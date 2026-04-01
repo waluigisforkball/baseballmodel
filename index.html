@@ -605,6 +605,12 @@ canvas{max-width:100%}
   <div id="gfChips" style="display:flex;gap:5px;flex-wrap:nowrap"></div>
 </div>
 
+<!-- INJURY STRIP -->
+<div id="injuryStrip" style="display:none;padding:6px 18px;background:var(--bg);border-bottom:1px solid var(--b1)">
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap" id="injuryChips">
+  </div>
+</div>
+
 <!-- MAIN -->
 <main class="main">
   <div class="empty" id="emptyState">
@@ -1053,6 +1059,8 @@ async function load(date) {
     await fetchAllPlayerProps(raw);
     setStatus('spin', 'Computing 1st inning run likelihood…');
     await fetchYRFI(raw);
+    setStatus('spin', 'Fetching injury report…');
+    await fetchInjuries(raw);
     setStatus('spin', 'AI enriching pitchers & teams (pass 1/2)…');
     await aiEnrichPitchersTeams(raw);
     setStatus('spin', 'AI enriching batters (pass 2/2)…');
@@ -1067,6 +1075,7 @@ async function load(date) {
     if (propCount) chips.push({cls:'odds',txt:`Props: ${propCount} games`});
     if (S.oddsOk) chips.push({cls:'odds',txt:'Odds ✓'}); else chips.push({cls:'err',txt:'Odds: No data'});
     if (S.aiDone.size) chips.push({cls:'ai',txt:'AI: '+S.aiDone.size+' enriched'});
+    if (S._injuries?.length) chips.push({cls:'err',txt:'IL: '+S._injuries.length+' players'});
     const winLabel = S.activePreset==='season'?'This Season':S.activePreset==='lastseason'?'Last Season':S.activePreset==='custom'?(S.statsStart+'→'+S.statsEnd):('Last '+S.days+'d');
     chips.push({cls:'',txt:'Window: '+winLabel});
     chips.push({cls:S.oddsWt>0?'odds':'',txt:'Odds Wt: '+S.oddsWt+'%'});
@@ -1462,6 +1471,112 @@ async function fetchOdds(games) {
   } catch(e) { console.warn('Odds API:', e.message); }
 }
 function bestLine(l){return l.length?l.slice().sort((a,b)=>b.price-a.price)[0]:null;}
+
+// ─────────────────────────────────────────────────────────────
+// INJURIES — fetch IL transactions and match against today's roster
+// Uses MLB Stats API /transactions endpoint (free, no key needed)
+// ─────────────────────────────────────────────────────────────
+async function fetchInjuries(games) {
+  try {
+    const date = S.date || todayISO();
+    // Look back 30 days to catch recent IL placements still in effect
+    const startDate = addDays(date, -30);
+    const url = `${MLB_BASE}/transactions?sportId=1&startDate=${startDate}&endDate=${date}&limit=200`;
+    const data = await proxyFetch(url);
+    if (!data?.transactions?.length) { S._injuries = []; return; }
+
+    // Filter to active IL moves — placement types we care about
+    const IL_TYPES = ['IL Placement', '15-Day IL', '10-Day IL', '60-Day IL', '7-Day IL'];
+    const RETURN_TYPES = ['IL Activation', 'IL Return', 'Reinstated'];
+
+    // Build a set of player IDs who have been activated/returned (no longer on IL)
+    const returned = new Set();
+    for (const t of data.transactions) {
+      if (RETURN_TYPES.some(rt => (t.typeDesc||'').includes(rt))) {
+        if (t.player?.id) returned.add(t.player.id);
+      }
+    }
+
+    // Collect current IL players — on IL but not returned
+    const ilMap = {}; // playerId -> {name, team, desc, date}
+    for (const t of data.transactions) {
+      const pid = t.player?.id;
+      if (!pid) continue;
+      if (!IL_TYPES.some(it => (t.typeDesc||'').includes(it))) continue;
+      if (returned.has(pid)) continue;
+      ilMap[pid] = {
+        name:   t.player?.fullName || '?',
+        team:   t.toTeam?.abbreviation || t.fromTeam?.abbreviation || '?',
+        desc:   t.typeDesc || 'IL',
+        date:   t.date || '',
+        pid,
+      };
+    }
+
+    // Match against today's games — flag players in lineups or as probable SPs
+    const teamAbbrevs = new Set(games.flatMap(g => [g.away, g.home]));
+    const flagged = [];
+
+    for (const entry of Object.values(ilMap)) {
+      // Only surface players on teams in today's slate
+      const teamNorm = normDKTeam(entry.team);
+      const inSlate  = teamAbbrevs.has(entry.team) || teamAbbrevs.has(teamNorm);
+      if (!inSlate) continue;
+
+      // Check if this player appears in any lineup or as a SP
+      let role = null;
+      for (const g of games) {
+        for (const b of [...(g.away_lu||[]), ...(g.home_lu||[])]) {
+          if (b.player_id === entry.pid || normName(b.name) === normName(entry.name)) {
+            const side = g.away_lu.includes(b) ? g.away : g.home;
+            role = `in ${side} lineup`;
+          }
+        }
+        if (g.away_sp_id === entry.pid || normName(g.asp?.name||'') === normName(entry.name)) role = `${g.away} SP`;
+        if (g.home_sp_id === entry.pid || normName(g.hsp?.name||'') === normName(entry.name)) role = `${g.home} SP`;
+      }
+
+      flagged.push({ ...entry, role, inLineup: !!role });
+    }
+
+    // Sort: players in lineups/SPs first, then by team
+    flagged.sort((a,b) => (b.inLineup?1:0) - (a.inLineup?1:0));
+    S._injuries = flagged;
+  } catch(e) {
+    console.warn('Injury fetch failed:', e.message);
+    S._injuries = [];
+  }
+}
+
+function renderInjuryStrip() {
+  const strip = document.getElementById('injuryStrip');
+  const chips = document.getElementById('injuryChips');
+  if (!strip || !chips) return;
+
+  const injuries = S._injuries || [];
+  if (!injuries.length) { strip.style.display = 'none'; return; }
+
+  strip.style.display = 'block';
+
+  // Show all IL players on today's slate, highlight those in active lineups
+  chips.innerHTML = [
+    `<span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--r);flex-shrink:0">🚑 IL</span>`,
+    ...injuries.map(p => {
+      const bg   = p.inLineup ? 'rgba(255,69,58,.15)' : 'var(--bg3)';
+      const border = p.inLineup ? '1px solid rgba(255,69,58,.4)' : '1px solid var(--b1)';
+      const nameCol = p.inLineup ? 'var(--r)' : 'var(--t2)';
+      const badge  = p.inLineup ? `<span style="font-size:8px;color:var(--r);font-weight:700;margin-left:3px">${p.role}</span>` : '';
+      const tip = `${p.name} (${p.team}) — ${p.desc}${p.date ? ' · ' + p.date : ''}`;
+      return `<div title="${tip}" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:var(--r1);background:${bg};border:${border};cursor:default">
+        <span style="font-size:10px;font-weight:600;color:var(--t3)">${p.team}</span>
+        <span style="font-size:11px;font-weight:700;color:${nameCol}">${p.name.split(' ').pop()}</span>
+        <span style="font-size:9px;color:var(--t3)">${p.desc.replace(' Placement','').replace('-Day IL','d IL')}</span>
+        ${badge}
+      </div>`;
+    })
+  ].join('');
+}
+
 
 // ─────────────────────────────────────────────────────────────
 // YRFI — Yes/No First Inning Run Likelihood
@@ -2321,6 +2436,14 @@ function updateDKStatus() {
   el.textContent  = S.dkStatusMsg || 'No file loaded yet';
   el.className    = 'dfs-file-status' + (S.dkStatusOk ? ' ok' : S.dkStatusMsg?.startsWith('✕') ? ' err' : '');
 }
+function toggleDKUpload() {
+  const body   = document.getElementById('dkUploadBody');
+  const toggle = document.getElementById('dkUploadToggle');
+  if (!body || !toggle) return;
+  const open = body.style.display === 'none';
+  body.style.display  = open ? 'block' : 'none';
+  toggle.textContent  = open ? '▲ Hide' : '▼ Instructions';
+}
 function normName(n) {
   if (!n) return '';
   // Normalize accented/special chars to ASCII equivalents first
@@ -2397,6 +2520,7 @@ function renderSlate() {
   updateSlateSummary();
   updatePropBar();
   renderYRFIStrip();
+  renderInjuryStrip();
   renderView();
   showLocalServerBanner(S._aiCorsBlocked);
   // Show DFS tab only in DFS mode
@@ -2789,7 +2913,10 @@ function rerankDFS() {
     const g = S.games.find(gg => `${gg.away}@${gg.home}` === b._game);
     const isAway = g?.away_lu?.includes(b) || (b._pos && g?.away === b._game?.split('@')[0]);
     const oddsBoost = g ? (isAway ? (g._awayHitterBoost||0) : (g._homeHitterBoost||0)) : 0;
-    b._dkPts  = dkBatterPoints(b, b._ph, OW, oddsBoost);
+    const homeWinProb = g?.odds?.imp_home ? g.odds.imp_home / 100 : 0.50;
+    b._dkPts  = dkBatterPoints(b, b._ph, {
+      ...OW, _isAway: isAway, _homeWinProb: homeWinProb,
+    }, oddsBoost);
     b._score  = computeBatterScore(b, b._ph, b._dkPts, b._wxBonus, OW);
     b._val    = b._sal>0 ? R(b._dkPts/b._sal*1000, 2) : 0;
   }
@@ -2846,7 +2973,19 @@ function dkBatterPoints(b, ph, weights, oddsBoost) {
 
   // Project PAs per game — top-of-order gets more (~4.3), bottom gets less (~3.5)
   const ord  = b.ord || 5;
-  const pa   = ord <= 2 ? 4.3 : ord <= 5 ? 4.0 : ord <= 7 ? 3.8 : 3.5;
+  let   pa   = ord <= 2 ? 4.3 : ord <= 5 ? 4.0 : ord <= 7 ? 3.8 : 3.5;
+
+  // Away team PA boost: visitors are guaranteed a 9th inning at-bat while the
+  // home team only bats in the bottom of the 9th ~58% of games (when trailing/tied).
+  // Base extra PA = 1 inning / 9 batters = ~0.111 PA per slot per game.
+  // Scale by how often home team WON'T bat in 9th = (1 - homeWinProb).
+  // If home is 70% to win → home bats in 9th only 30% → away gets full extra PA.
+  // If coin flip → away gets ~42% of an extra PA on average.
+  if (weights?._isAway) {
+    const homeWinProb = Math.min(0.85, Math.max(0.15, weights._homeWinProb || 0.50));
+    const extraPA = (1 - homeWinProb) * (1/9);  // fraction of 9th inning extra PA
+    pa += extraPA;
+  }
 
   // Decompose ISO into XBH components using MLB distribution
   // League avg XBH split: ~68% 2B, ~5% 3B, ~27% HR of total ISO
@@ -3229,7 +3368,13 @@ function renderDFS() {
       // Pull odds boost for this team's hitters
       const isAway   = g.away_lu.includes(b);
       const oddsBoost = isAway ? (g._awayHitterBoost||0) : (g._homeHitterBoost||0);
-      const dkPts  = dkBatterPoints(b, ph, {...OW, _ordAdj: b._ordAdj||0}, oddsBoost);
+      // Home win probability — used to scale the away PA boost
+      const homeWinProb = g.odds?.imp_home ? g.odds.imp_home / 100 : 0.50;
+      const dkPts  = dkBatterPoints(b, ph, {
+        ...OW, _ordAdj: b._ordAdj||0,
+        _isAway: isAway,
+        _homeWinProb: homeWinProb,
+      }, oddsBoost);
       const score  = computeBatterScore(b, ph, dkPts, wxBonus, OW);
       const val    = sal>0 ? R(dkPts/sal*1000, 2) : 0;
       allBatters.push({
@@ -3279,22 +3424,42 @@ function renderDFS() {
   const hasSalaries = allBatters.some(b=>b._sal>0) || allPitchers.some(p=>p._sal>0);
   const stacks = computeStacks(gs);
 
+  // Collapsible upload panel — collapses when CSV already loaded, expanded when empty
+  const csvLoaded = S.dkStatusOk && Object.keys(S.dkSalaries).length > 0;
+  const slateMsg = S.dkSlateTeams?.size > 0
+    ? ` · ${S.dkSlateTeams.size} teams · <span style="color:var(--g)">${[...S.dkSlateTeams].sort().join(', ')}</span>`
+    : '';
   const uploadPanel = `
-<div class="dfs-upload-panel">
-  <div class="dfs-upload-title">📥 DraftKings Salary CSV</div>
-  <div class="dfs-upload-steps">
-    <strong>How to get your DraftKings salary file:</strong><br>
-    1. Go to <strong>draftkings.com</strong> → top nav: <strong>Sports → MLB</strong><br>
-    2. Click into any <strong>Classic contest</strong> for today's slate → <strong>Enter Contest</strong><br>
-    3. In the lineup builder, click the <strong>⬇ Export to CSV</strong> button (top-right of the player list)<br>
-    4. Save the downloaded file and upload it here ↓
+<div class="dfs-upload-panel" id="dkUploadPanel">
+  <!-- Collapsed summary row — always visible -->
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-family:var(--fm);font-size:10px;font-weight:700;letter-spacing:1px;color:var(--pu);text-transform:uppercase">📥 DK Salaries</span>
+      <span style="font-size:11px;color:${csvLoaded?'var(--g)':'var(--t3)'}" id="dkFileStatus">
+        ${csvLoaded ? S.dkStatusMsg + slateMsg : (S.dkStatusMsg || 'No file loaded')}
+      </span>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+      <button class="dfs-file-btn" onclick="document.getElementById('dfsFileInput').click()" style="padding:4px 12px;font-size:11px">
+        ${csvLoaded ? '↺ Re-upload' : '📂 Upload CSV'}
+      </button>
+      <button onclick="toggleDKUpload()" id="dkUploadToggle"
+        style="background:var(--bg4);border:1px solid var(--b1);color:var(--t3);padding:4px 10px;border-radius:var(--r1);cursor:pointer;font-size:11px">
+        ${csvLoaded ? '▼ Instructions' : '▲ Hide'}
+      </button>
+    </div>
   </div>
-  <div class="dfs-upload-zone">
-    <button class="dfs-file-btn" onclick="document.getElementById('dfsFileInput').click()">📂 Choose CSV File</button>
-    <span class="dfs-file-status" id="dkFileStatus">${S.dkStatusMsg||'No file loaded yet'}</span>
+  <!-- Expandable instructions — hidden when CSV loaded, shown when not -->
+  <div id="dkUploadBody" style="display:${csvLoaded?'none':'block'};margin-top:10px">
+    <div class="dfs-upload-steps">
+      <strong>How to get your DraftKings salary file:</strong><br>
+      1. Go to <strong>draftkings.com</strong> → top nav: <strong>Sports → MLB</strong><br>
+      2. Click into any <strong>Classic contest</strong> for today's slate → <strong>Enter Contest</strong><br>
+      3. In the lineup builder, click the <strong>⬇ Export to CSV</strong> button (top-right of the player list)<br>
+      4. Save the downloaded file and upload it here ↓
+    </div>
+    <div class="dfs-csv-hint">Expected columns: <code>Name, Position, Salary, TeamAbbrev, Game Info</code> — default DraftKings export, no editing needed.</div>
   </div>
-  <div class="dfs-csv-hint">Expected columns: <code>Name, Position, Salary, TeamAbbrev, Game Info</code> — default DraftKings export, no editing needed.</div>
-  ${S.dkSlateTeams && S.dkSlateTeams.size > 0 ? `<div style="margin-top:8px;padding:6px 10px;background:rgba(255,107,0,.1);border:1px solid rgba(255,107,0,.3);border-radius:var(--r1);font-size:11px;color:var(--g)">✓ Slate filter active — showing only players from <b style="color:var(--g)">${S.dkSlateTeams.size} teams</b>: ${[...S.dkSlateTeams].sort().join(', ')}</div>` : ''}
 </div>`;
 
   const sortBtns = [
