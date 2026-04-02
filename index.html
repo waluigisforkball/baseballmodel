@@ -2442,7 +2442,7 @@ function toggleDKUpload() {
   if (!body || !toggle) return;
   const open = body.style.display === 'none';
   body.style.display  = open ? 'block' : 'none';
-  toggle.textContent  = open ? '▲ Hide' : '▼ Instructions';
+  toggle.textContent  = open ? '▲ Hide instructions' : '▼ How to get file';
 }
 function normName(n) {
   if (!n) return '';
@@ -3424,20 +3424,22 @@ function renderDFS() {
   const hasSalaries = allBatters.some(b=>b._sal>0) || allPitchers.some(p=>p._sal>0);
   const stacks = computeStacks(gs);
 
-  // Collapsible upload panel — collapses when CSV already loaded, expanded when empty
+  // Collapsible upload panel — always collapsed by default
+  // Collapsed state shows status + hint to open for instructions
   const csvLoaded = S.dkStatusOk && Object.keys(S.dkSalaries).length > 0;
   const slateMsg = S.dkSlateTeams?.size > 0
-    ? ` · ${S.dkSlateTeams.size} teams · <span style="color:var(--g)">${[...S.dkSlateTeams].sort().join(', ')}</span>`
+    ? ` &middot; ${S.dkSlateTeams.size} teams: <span style="color:var(--g)">${[...S.dkSlateTeams].sort().join(', ')}</span>`
     : '';
   const uploadPanel = `
 <div class="dfs-upload-panel" id="dkUploadPanel">
-  <!-- Collapsed summary row — always visible -->
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-    <div style="display:flex;align-items:center;gap:8px">
+  <!-- Collapsed summary row — always visible, always collapsed by default -->
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span style="font-family:var(--fm);font-size:10px;font-weight:700;letter-spacing:1px;color:var(--pu);text-transform:uppercase">📥 DK Salaries</span>
-      <span style="font-size:11px;color:${csvLoaded?'var(--g)':'var(--t3)'}" id="dkFileStatus">
-        ${csvLoaded ? S.dkStatusMsg + slateMsg : (S.dkStatusMsg || 'No file loaded')}
-      </span>
+      ${csvLoaded
+        ? `<span style="font-size:11px;color:var(--g)" id="dkFileStatus">${S.dkStatusMsg}${slateMsg}</span>`
+        : `<span style="font-size:11px;color:var(--t3)" id="dkFileStatus">No file loaded &mdash; <span style="color:var(--pu);cursor:pointer;text-decoration:underline" onclick="toggleDKUpload()">how to get the DK salary file ↓</span></span>`
+      }
     </div>
     <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
       <button class="dfs-file-btn" onclick="document.getElementById('dfsFileInput').click()" style="padding:4px 12px;font-size:11px">
@@ -3445,12 +3447,12 @@ function renderDFS() {
       </button>
       <button onclick="toggleDKUpload()" id="dkUploadToggle"
         style="background:var(--bg4);border:1px solid var(--b1);color:var(--t3);padding:4px 10px;border-radius:var(--r1);cursor:pointer;font-size:11px">
-        ${csvLoaded ? '▼ Instructions' : '▲ Hide'}
+        ▼ How to get file
       </button>
     </div>
   </div>
-  <!-- Expandable instructions — hidden when CSV loaded, shown when not -->
-  <div id="dkUploadBody" style="display:${csvLoaded?'none':'block'};margin-top:10px">
+  <!-- Instructions — always hidden by default, toggle to reveal -->
+  <div id="dkUploadBody" style="display:none;margin-top:10px">
     <div class="dfs-upload-steps">
       <strong>How to get your DraftKings salary file:</strong><br>
       1. Go to <strong>draftkings.com</strong> → top nav: <strong>Sports → MLB</strong><br>
@@ -3488,8 +3490,8 @@ function renderDFS() {
   </div>
   <button class="btn" id="runOptimizerBtn" style="background:var(--pu);font-size:12px;padding:7px 20px"
     onclick="runAndShowOptimizer()">⚡ Generate Optimal Lineup</button>
-  ${hasSalaries?'':'<span style="font-size:11px;color:var(--y);margin-left:12px">⚠ Upload DK salary CSV above for full optimization</span>'}
-  \${lineupNotPostedHtml}
+  ${hasSalaries?'':'<span style="font-size:11px;color:var(--y);margin-left:12px">⚠ Upload a DK salary CSV to enable full salary-cap optimization</span>'}
+  ${lineupNotPostedHtml}
 </div>
 <div id="optimizerResult" style="margin-bottom:14px"></div>`;
 
