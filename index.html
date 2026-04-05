@@ -518,8 +518,8 @@ canvas{max-width:100%}
   <div class="ss" id="sbOvWrap" title="Games where the model favors the over — weak pitching, strong offenses, hitter-friendly park and weather all pointing the same direction"><span class="ss-l">OVER ENV</span><span class="ss-v r" id="sbOv">—</span></div>
   <div class="ss" id="sbStkWrap" style="display:none"><span class="ss-l">TOP STACK</span><span class="ss-v" style="color:var(--pu)" id="sbStk">—</span></div>
   <button class="btn" id="summaryBtn" onclick="generateSlateSummary()"
-    style="margin-left:8px;font-size:12px;padding:5px 14px;background:var(--g);flex-shrink:0;opacity:.5;cursor:not-allowed"
-    title="Requires server-side proxy — coming soon">
+    style="margin-left:8px;font-size:12px;padding:5px 14px;background:var(--g);flex-shrink:0"
+    title="AI-generated slate breakdown — powered by Claude">
     ✦ Slate Breakdown
   </button>
   <div class="frow" id="filterRow">
@@ -2442,7 +2442,7 @@ function toggleDKUpload() {
   if (!body || !toggle) return;
   const open = body.style.display === 'none';
   body.style.display  = open ? 'block' : 'none';
-  toggle.textContent  = open ? '▲ Hide instructions' : '▼ How to get file';
+  toggle.textContent  = open ? '▲ Hide' : '▼ Instructions';
 }
 function normName(n) {
   if (!n) return '';
@@ -3424,21 +3424,20 @@ function renderDFS() {
   const hasSalaries = allBatters.some(b=>b._sal>0) || allPitchers.some(p=>p._sal>0);
   const stacks = computeStacks(gs);
 
-  // Collapsible upload panel — always collapsed by default
-  // Collapsed state shows status + hint to open for instructions
+  // Collapsible upload panel — collapses when CSV already loaded, expanded when empty
   const csvLoaded = S.dkStatusOk && Object.keys(S.dkSalaries).length > 0;
   const slateMsg = S.dkSlateTeams?.size > 0
-    ? ` &middot; ${S.dkSlateTeams.size} teams: <span style="color:var(--g)">${[...S.dkSlateTeams].sort().join(', ')}</span>`
+    ? ` · ${S.dkSlateTeams.size} teams · <span style="color:var(--g)">${[...S.dkSlateTeams].sort().join(', ')}</span>`
     : '';
   const uploadPanel = `
 <div class="dfs-upload-panel" id="dkUploadPanel">
-  <!-- Collapsed summary row — always visible, always collapsed by default -->
+  <!-- Collapsed row — always visible -->
   <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span style="font-family:var(--fm);font-size:10px;font-weight:700;letter-spacing:1px;color:var(--pu);text-transform:uppercase">📥 DK Salaries</span>
       ${csvLoaded
         ? `<span style="font-size:11px;color:var(--g)" id="dkFileStatus">${S.dkStatusMsg}${slateMsg}</span>`
-        : `<span style="font-size:11px;color:var(--t3)" id="dkFileStatus">No file loaded &mdash; <span style="color:var(--pu);cursor:pointer;text-decoration:underline" onclick="toggleDKUpload()">how to get the DK salary file ↓</span></span>`
+        : `<span style="font-size:11px;color:var(--t3)" id="dkFileStatus">No file loaded</span>`
       }
     </div>
     <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
@@ -3451,14 +3450,13 @@ function renderDFS() {
       </button>
     </div>
   </div>
-  <!-- Instructions — always hidden by default, toggle to reveal -->
+  <!-- Expandable instructions — always hidden by default -->
   <div id="dkUploadBody" style="display:none;margin-top:10px">
     <div class="dfs-upload-steps">
       <strong>How to get your DraftKings salary file:</strong><br>
       1. Go to <strong>draftkings.com</strong> → top nav: <strong>Sports → MLB</strong><br>
       2. Click into any <strong>Classic contest</strong> for today's slate → <strong>Enter Contest</strong><br>
-      3. In the lineup builder, click the <strong>⬇ Export to CSV</strong> button (top-right of the player list)<br>
-      4. Save the downloaded file and upload it here ↓
+      3. In the lineup builder, click the <strong>⬇ Export to CSV</strong> button (top-right of the player list)
     </div>
     <div class="dfs-csv-hint">Expected columns: <code>Name, Position, Salary, TeamAbbrev, Game Info</code> — default DraftKings export, no editing needed.</div>
   </div>
@@ -3490,8 +3488,8 @@ function renderDFS() {
   </div>
   <button class="btn" id="runOptimizerBtn" style="background:var(--pu);font-size:12px;padding:7px 20px"
     onclick="runAndShowOptimizer()">⚡ Generate Optimal Lineup</button>
-  ${hasSalaries?'':'<span style="font-size:11px;color:var(--y);margin-left:12px">⚠ Upload a DK salary CSV to enable full salary-cap optimization</span>'}
-  ${lineupNotPostedHtml}
+  ${hasSalaries?'':'<span style="font-size:11px;color:var(--y);margin-left:12px">⚠ Upload DK salary CSV above for full optimization</span>'}
+  \${lineupNotPostedHtml}
 </div>
 <div id="optimizerResult" style="margin-bottom:14px"></div>`;
 
@@ -4286,15 +4284,9 @@ async function generateSlateSummary() {
   const modal = document.getElementById('summaryModal');
   const content = document.getElementById('summaryContent');
   modal.style.display = 'flex';
-  // AI slate breakdown requires a server-side proxy to call Anthropic API safely.
-  // Browsers block direct API calls with exposed keys. Coming soon via Netlify Functions.
-  content.innerHTML =
-    '<p style="color:var(--t);font-size:15px;font-weight:600;margin-bottom:12px">&#10022; Slate Breakdown &#8212; Coming Soon</p>' +
-    '<p style="color:var(--t2);margin-bottom:14px">This feature calls the Anthropic AI API to generate a plain-English slate analysis. It requires a secure server-side proxy &#8212; browsers cannot make this call safely with an exposed API key.</p>' +
-    '<p style="color:var(--t2);margin-bottom:14px">The fix is a small Netlify Function. Once hosted on Netlify, this button will work fully.</p>' +
-    '<p style="color:var(--t3);font-size:12px">In the meantime, the Prop Targets bar and Edge Rankings tab provide most of the same signal.</p>';
-  return;
-  content.innerHTML = '<div id="summarySpinner" style="display:flex;align-items:center;gap:10px;color:var(--t3)"><div class="spin"></div> Analyzing today\'s slate…</div>';
+  // Route through Cloudflare Worker — keeps API key off the client
+  const CF_WORKER_URL = 'https://anthropickey.billywitchdoctordfs.workers.dev';
+  content.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:var(--t3)"><div class="spin"></div> Analyzing today\'s slate…</div>';
 
   const gs = filteredGames().length ? filteredGames() : S.games;
   if (!gs.length) {
@@ -4345,19 +4337,16 @@ PROP TARGETS (from model):
 Write the breakdown covering: (1) the top 1-2 pitching matchups and specific K prop angles, (2) the best hitting environments and specific power/TB targets, (3) any value plays or fades, and (4) a one-sentence DFS focus for the day. Keep it under 300 words. Be direct and confident.`;
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    // Call Cloudflare Worker proxy — keeps Anthropic API key off the client
+    const resp = await fetch(CF_WORKER_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01', 'anthropic-dangerous-allow-browser': 'true' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 600,
-        system: 'You are a sharp, concise baseball DFS and betting analyst. Give specific, actionable takes. No hedging. Write in plain prose, no bullet points.',
-        messages: [{ role: 'user', content: prompt }]
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, maxTokens: 600 })
     });
+    if (!resp.ok) throw new Error('Worker returned ' + resp.status);
     const data = await resp.json();
-    const text = data.content?.[0]?.text || '';
-    if (!text) throw new Error(data.error?.message || 'No response from AI');
+    const text = data.text || data.content?.[0]?.text || '';
+    if (!text) throw new Error(data.error || 'No response from AI');
 
     // Format into readable paragraphs
     const formatted = text.split(/\n\n+/).map(p =>
@@ -4367,15 +4356,16 @@ Write the breakdown covering: (1) the top 1-2 pitching matchups and specific K p
       `<p style="color:var(--t3)">No summary generated.</p>`;
 
   } catch(err) {
-    const isCors = err.message.includes('fetch') || err.message.includes('Failed');
-    const errMsg = isCors ? 'AI API blocked — running as local file.' : err.message;
-    const serverHint = isCors
-      ? '<p style="color:var(--t2);margin-top:10px">Serve from a local server to enable AI breakdown:</p>'
-        + '<pre style="background:var(--bg3);padding:12px;border-radius:var(--r1);font-size:12px;color:var(--g);margin-top:8px">cd ~/Downloads&#10;python3 -m http.server 8080</pre>'
-        + '<p style="color:var(--t2);margin-top:10px">Then open <a href="http://localhost:8080" style="color:var(--bl)">http://localhost:8080</a></p>'
+    const isWorkerErr = err.message.includes('Worker') || err.message.includes('fetch') || err.message.includes('Failed') || err.message.includes('NetworkError');
+    const errMsg = isWorkerErr
+      ? 'Cloudflare Worker not yet deployed.'
+      : err.message;
+    const hint = isWorkerErr
+      ? '<p style="color:var(--t2);margin-top:10px;font-size:12px">To enable AI slate breakdown, deploy the Cloudflare Worker. It takes about 10 minutes and is free. See the README in your GitHub repo for instructions.</p>'
       : '';
-    content.innerHTML = '<p style="color:var(--r);margin-bottom:12px">⚠ ' + errMsg + '</p>' + serverHint;
+    content.innerHTML = '<p style="color:var(--r);margin-bottom:12px">⚠ ' + errMsg + '</p>' + hint;
   }
+}
 }
 
 function showGuide() {
