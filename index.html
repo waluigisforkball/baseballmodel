@@ -717,6 +717,7 @@ const ODDS_PROP_CACHE_MS = 45 * 60 * 1000;
 const MLB_BASE   = 'https://statsapi.mlb.com/api/v1';
 const WX_BASE    = 'https://api.open-meteo.com/v1/forecast';
 const ODDS_BASE  = 'https://api.the-odds-api.com/v4';
+const CF_WORKER_URL = 'https://anthropickey.billywitchdoctordfs.workers.dev';
 
 // Proxy list — tried in order, first success wins
 const PROXIES = [
@@ -2042,13 +2043,16 @@ Required JSON structure — fill ALL fields with realistic 2025 estimates:
 }`;
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages',{
+    const res = await fetch(CF_WORKER_URL, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:4000,messages:[{role:'user',content:prompt}]})
+      body:JSON.stringify({
+        prompt, maxTokens:4000,
+        system:'You are a baseball analytics engine. Return ONLY valid JSON, no markdown, no explanation.',
+      })
     });
-    if (!res.ok) throw new Error('Anthropic '+res.status);
     const data = await res.json();
-    const txt  = (data.content||[]).map(c=>c.text||'').join('');
+    if (!res.ok) throw new Error('Worker ' + res.status + ': ' + (data.error||'unknown'));
+    const txt  = data.text || (data.content||[]).map(c=>c.text||'').join('');
     const parsed = JSON.parse(txt.replace(/```json|```/g,'').trim());
     for (const g of games) {
       for (const sp of [g.asp, g.hsp]) {
@@ -2116,13 +2120,16 @@ JSON structure:
   }
 }`;
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:4000,messages:[{role:'user',content:prompt}]})
+      const res = await fetch(CF_WORKER_URL, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          prompt, maxTokens:4000,
+          system:'You are a baseball analytics engine. Return ONLY valid JSON, no markdown, no explanation.',
+        })
       });
-      if (!res.ok) throw new Error('Anthropic '+res.status);
       const data = await res.json();
-      const txt = (data.content||[]).map(c=>c.text||'').join('');
+      if (!res.ok) throw new Error('Worker ' + res.status + ': ' + (data.error||'unknown'));
+      const txt = data.text || (data.content||[]).map(c=>c.text||'').join('');
       const parsed = JSON.parse(txt.replace(/```json|```/g,'').trim());
       Object.assign(allParsed, parsed);
     } catch(err) { console.warn('AI pass 2 chunk error:', err.message); }
@@ -4284,8 +4291,7 @@ async function generateSlateSummary() {
   const modal = document.getElementById('summaryModal');
   const content = document.getElementById('summaryContent');
   modal.style.display = 'flex';
-  // Route through Cloudflare Worker — keeps API key off the client
-  const CF_WORKER_URL = 'https://anthropickey.billywitchdoctordfs.workers.dev';
+  // CF_WORKER_URL defined at top of script
   content.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:var(--t3)"><div class="spin"></div> Analyzing today\'s slate…</div>';
 
   const gs = filteredGames().length ? filteredGames() : S.games;
@@ -4343,8 +4349,8 @@ Write the breakdown covering: (1) the top 1-2 pitching matchups and specific K p
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, maxTokens: 600 })
     });
-    if (!resp.ok) throw new Error('Worker returned ' + resp.status);
     const data = await resp.json();
+    if (!resp.ok) throw new Error('Worker error ' + resp.status + ': ' + (data.error || 'unknown'));
     const text = data.text || data.content?.[0]?.text || '';
     if (!text) throw new Error(data.error || 'No response from AI');
 
