@@ -635,7 +635,7 @@ canvas{max-width:100%}
       <button class="vt on" data-v="cards">Matchup Cards</button>
       <button class="vt" data-v="heatmap">🔥 Heatmap</button>
       <button class="vt" data-v="table" id="vtTable">📊 Table</button>
-      <button class="vt" data-v="charts" id="vtCharts">📈 Charts</button>
+      <button class="vt" data-v="charts" id="vtCharts">📈 Pitcher Charts</button>
       <button class="vt" data-v="edges">Edge Rankings</button>
       <button class="vt" data-v="dfs" id="vtDfs" style="display:none;color:var(--pu)">💰 DFS</button>
       <button class="vt" data-v="tb" id="vtTB">🎯 TB Targets</button>
@@ -4548,6 +4548,18 @@ async function fetchTBSplits() {
 function scoreTBTargets() {
   const targets = [];
 
+  // Build a flat prop lookup: normalized name → { line, overPrice, underPrice }
+  const propLookup = {};
+  for (const props of Object.values(S.playerProps || {})) {
+    for (const entry of (props.tbProps || [])) {
+      const key = normName(entry.name);
+      if (!propLookup[key]) propLookup[key] = { line: null, overPrice: null, underPrice: null };
+      if (entry.line != null) propLookup[key].line = entry.line;
+      if (entry.type === 'Over')  propLookup[key].overPrice  = entry.price;
+      if (entry.type === 'Under') propLookup[key].underPrice = entry.price;
+    }
+  }
+
   for (const g of filteredGames()) {
     const matchups = [
       { lu: g.away_lu, oppSP: g.hsp, oppSPId: g.home_sp_id, myTeam: g.away, isAway: true,  oppTeam: g.home },
@@ -4557,71 +4569,45 @@ function scoreTBTargets() {
     for (const { lu, oppSP, oppSPId, myTeam, isAway, oppTeam } of matchups) {
       if (!lu?.length) continue;
       const spHand = oppSP?.hand || 'R';
-
-      // Pitcher split: SLG allowed vs batter hand (from Worker)
-      // pSplits.vsL = slg allowed vs LHB, pSplits.vsR = slg allowed vs RHB
       const pSplits = S.tbSplits.pitchers[oppSPId] || {};
 
       for (const b of lu) {
         if (!b.name) continue;
-        const bHand = b.hand || 'R'; // batter handedness
+        const bHand = b.hand || 'R';
 
-        // Factor 1: Batter SLG vs pitcher hand — from Worker (individual) or fallback to team split
         const workerBatterSplit = S.tbSplits.batters[b.player_id] || {};
-        const batterSLG = (bHand === 'L')
-          ? (workerBatterSplit.vsR ?? parseFloat(bSplit(b, 'R').slg) ?? b.slg ?? 0.380)
-          : (workerBatterSplit.vsL ?? parseFloat(bSplit(b, 'L').slg) ?? b.slg ?? 0.380);
-        // batter hits vs opposite hand of pitcher:
-        // if SP is R, batter sees RHP → use batter's vsR split
         const batterSLGvsSP = (spHand === 'R')
           ? (workerBatterSplit.vsR ?? parseFloat(bSplit(b, 'R').slg) ?? b.slg ?? 0.380)
           : (workerBatterSplit.vsL ?? parseFloat(bSplit(b, 'L').slg) ?? b.slg ?? 0.380);
 
-        // Factor 2: Pitcher SLG allowed vs batter hand
         const pitcherSLGvsBatter = (bHand === 'L')
           ? (pSplits.vsL ?? oppSP?.slg_against ?? 0.400)
           : (pSplits.vsR ?? oppSP?.slg_against ?? 0.400);
 
-        // Factor 3: Park + weather
-        const parkHR   = (g.park?.hr || 100);
-        const parkRun  = (g.park?.run || 100);
+        const parkHR    = (g.park?.hr || 100);
+        const parkRun   = (g.park?.run || 100);
         const parkScore = ((parkHR - 100) * 0.003) + ((parkRun - 100) * 0.002);
         const windBonus = g.wx?.weff === 'out' ? 0.04 : g.wx?.weff === 'in' ? -0.03 : 0;
         const tempBonus = (!g.wx?.dome && g.wx?.temp_f) ? (g.wx.temp_f - 65) * 0.0005 : 0;
-
-        // Factor 4: Lineup position (1-2 best, 3-5 good, 6-9 penalized)
-        const ordBonus = b.ord <= 2 ? 0.04 : b.ord <= 5 ? 0.02 : b.ord <= 7 ? 0 : -0.02;
-
-        // Factor 5: Away batter bonus (guaranteed 9th inning AB)
+        const ordBonus  = b.ord <= 2 ? 0.04 : b.ord <= 5 ? 0.02 : b.ord <= 7 ? 0 : -0.02;
         const awayBonus = isAway ? 0.015 : 0;
 
-        // Composite score — weighted per your priority order
-        const score = (batterSLGvsSP   * 0.45)
+        const score = (batterSLGvsSP      * 0.45)
                     + (pitcherSLGvsBatter * 0.35)
-                    + parkScore
-                    + windBonus
-                    + tempBonus
-                    + ordBonus
-                    + awayBonus;
+                    + parkScore + windBonus + tempBonus + ordBonus + awayBonus;
+
+        const prop = propLookup[normName(b.name)] || null;
 
         targets.push({
-          name: b.name,
-          team: myTeam,
-          oppTeam,
-          isAway,
-          hand: bHand,
-          ord: b.ord,
-          oppSPName: oppSP?.name || 'TBD',
-          spHand,
-          batterSLG: batterSLGvsSP,
-          pitcherSLG: pitcherSLGvsBatter,
-          parkHR,
-          windDir: g.wx?.weff || 'none',
-          windSpd: g.wx?.wsp || 0,
-          temp: g.wx?.temp_f || null,
-          dome: g.wx?.dome || false,
-          venueName: g.venue || '',
-          score,
+          name: b.name, team: myTeam, oppTeam, isAway,
+          hand: bHand, ord: b.ord,
+          oppSPName: oppSP?.name || 'TBD', spHand,
+          batterSLG: batterSLGvsSP, pitcherSLG: pitcherSLGvsBatter,
+          parkHR, windDir: g.wx?.weff || 'none', windSpd: g.wx?.wsp || 0,
+          temp: g.wx?.temp_f || null, dome: g.wx?.dome || false,
+          venueName: g.venue || '', score,
+          propLine: prop?.line ?? null,
+          underPrice: prop?.underPrice ?? null,
           hasWorkerData: !!(S.tbSplits.batters[b.player_id] || S.tbSplits.pitchers[oppSPId]),
         });
       }
@@ -4634,7 +4620,24 @@ function scoreTBTargets() {
   const range = max - min || 1;
   targets.forEach(t => { t.pct = Math.round(((t.score - min) / range) * 100); });
 
-  return targets.sort((a,b) => b.score - a.score).slice(0, 15);
+  const sorted = targets.sort((a, b) => b.score - a.score);
+
+  // Top targets: best 15
+  const top = sorted.slice(0, 15);
+
+  // Low targets: bottom of the list where a prop line exists and pct <= 35
+  // Higher prop line relative to low model score = stronger under signal
+  const low = sorted
+    .filter(t => t.pct <= 35 && t.propLine != null)
+    .sort((a, b) => {
+      // Sort by prop line desc (higher line on a weak batter = better under)
+      const lineDiff = (b.propLine - a.propLine);
+      if (Math.abs(lineDiff) > 0.1) return lineDiff;
+      return a.pct - b.pct; // tiebreak: lower score first
+    })
+    .slice(0, 8);
+
+  return { top, low };
 }
 
 function renderTB() {
@@ -4651,29 +4654,40 @@ function renderTB() {
     return;
   }
 
-  const targets = scoreTBTargets();
-  if (!targets.length) {
+  const { top, low } = scoreTBTargets();
+  if (!top.length) {
     el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--t2);font-size:14px">No lineup data available yet.</div>`;
     return;
   }
 
   const dataNote = S.tbSplits.loaded
-    ? `<span style="color:var(--t3);font-size:11px">Individual splits ${targets.some(t=>t.hasWorkerData) ? '✓' : '— early season, using team fallback'}</span>`
+    ? `<span style="color:var(--t3);font-size:11px">Individual splits ${top.some(t=>t.hasWorkerData) ? '✓' : '— early season, using team fallback'}</span>`
     : '';
 
-  const cards = targets.map((t, i) => {
-    const slgColor = t.batterSLG >= 0.500 ? 'var(--pu)' : t.batterSLG >= 0.430 ? 'var(--g)' : 'var(--t)';
+  function mkCard(t, isLow) {
+    const slgColor  = t.batterSLG  >= 0.500 ? 'var(--pu)' : t.batterSLG  >= 0.430 ? 'var(--g)' : 'var(--t)';
     const pslgColor = t.pitcherSLG >= 0.450 ? 'var(--pu)' : t.pitcherSLG >= 0.390 ? 'var(--g)' : 'var(--t)';
     const parkColor = t.parkHR >= 108 ? 'var(--pu)' : t.parkHR >= 103 ? 'var(--g)' : 'var(--t)';
     const windLabel = t.dome ? 'Dome' : t.windSpd >= 8
-      ? `${t.windSpd}mph ${t.windDir === 'out' ? '↑ out' : t.windDir === 'in' ? '↓ in' : '→ cross'}`
+      ? `${t.windSpd}mph ${t.windDir==='out'?'↑ out':t.windDir==='in'?'↓ in':'→ cross'}`
       : t.windSpd > 0 ? `${t.windSpd}mph` : 'Calm';
-    const windColor = t.windDir === 'out' && t.windSpd >= 8 ? 'var(--g)' : t.windDir === 'in' && t.windSpd >= 8 ? 'var(--r)' : 'var(--t2)';
-    const ordLabel = `${t.ord}${['st','nd','rd'][t.ord-1]||'th'}`;
+    const windColor = t.windDir==='out'&&t.windSpd>=8?'var(--g)':t.windDir==='in'&&t.windSpd>=8?'var(--r)':'var(--t2)';
+    const ordLabel  = `${t.ord}${['st','nd','rd'][t.ord-1]||'th'}`;
     const awayBadge = t.isAway
       ? `<span style="display:inline-block;font-size:10px;padding:2px 6px;border-radius:4px;background:rgba(147,51,234,.12);color:var(--pu);margin-top:4px">Away</span>`
       : '';
-
+    const scoreCol = isLow
+      ? `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+          <div style="font-size:11px;color:var(--t3)">Line</div>
+          <div style="font-size:20px;font-weight:500;color:var(--t)">${t.propLine != null ? t.propLine.toFixed(1) : '—'}</div>
+          ${t.underPrice != null ? `<div style="font-size:11px;color:var(--t2)">${t.underPrice > 0 ? '+' : ''}${t.underPrice}</div>` : ''}
+        </div>`
+      : `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
+          <div style="font-size:22px;font-weight:500;color:var(--pu)">${t.pct}</div>
+          <div style="width:60px;height:4px;background:var(--b1);border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${t.pct}%;background:var(--pu);border-radius:2px"></div>
+          </div>
+        </div>`;
     return `<div style="background:var(--c2);border:0.5px solid var(--b1);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:grid;grid-template-columns:2fr 3fr 80px;gap:12px;align-items:center">
       <div>
         <div style="font-size:15px;font-weight:500;color:var(--t)">${t.name}</div>
@@ -4698,21 +4712,21 @@ function renderTB() {
           <div style="font-size:13px;font-weight:500;color:${windColor};margin-top:2px">${windLabel}</div>
         </div>
       </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
-        <div style="font-size:22px;font-weight:500;color:var(--pu)">${t.pct}</div>
-        <div style="width:60px;height:4px;background:var(--b1);border-radius:2px;overflow:hidden">
-          <div style="height:100%;width:${t.pct}%;background:var(--pu);border-radius:2px"></div>
-        </div>
-      </div>
+      ${scoreCol}
     </div>`;
-  }).join('');
+  }
+
+  const topCards  = top.map(t => mkCard(t, false)).join('');
+  const lowSection = low.length ? `
+    <div style="font-size:11px;font-weight:500;color:var(--t2);text-transform:uppercase;letter-spacing:.06em;margin:1.5rem 0 .5rem">Under targets</div>
+    ${low.map(t => mkCard(t, true)).join('')}` : '';
 
   el.innerHTML = `
     <div style="padding:4px 0 12px;display:flex;align-items:baseline;justify-content:space-between">
       <span style="font-size:15px;font-weight:500;color:var(--t)">TB Targets</span>
       ${dataNote}
     </div>
-    ${cards}`;
+    ${topCards}${lowSection}`;
 }
 
 </script>
