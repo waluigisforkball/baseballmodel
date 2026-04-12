@@ -587,10 +587,7 @@ canvas{max-width:100%}
     <!-- dots float above the bar, rendered by JS into this div -->
     <div id="yrfiDots" style="position:relative;width:100%;pointer-events:none;margin-bottom:4px"></div>
     <!-- fixed-height colored bar, always 6px, never inflated -->
-    <div id="yrfiBar" style="height:6px;border-radius:3px;background:var(--bg4);position:relative;overflow:hidden">
-      <div style="position:absolute;left:0;top:0;height:100%;width:33%;background:var(--bl);opacity:.3"></div>
-      <div style="position:absolute;left:33%;top:0;height:100%;width:34%;background:var(--y);opacity:.25"></div>
-      <div style="position:absolute;left:67%;top:0;height:100%;width:33%;background:var(--r);opacity:.3"></div>
+    <div id="yrfiBar" style="height:6px;border-radius:3px;background:linear-gradient(to right,#0a84ff,#ffd60a 50%,#ff453a);position:relative;overflow:hidden;opacity:.5">
     </div>
   </div>
   <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--t3);margin-top:5px" id="yrfiZoneLabels">
@@ -1065,10 +1062,7 @@ async function load(date) {
     await fetchYRFI(raw);
     setStatus('spin', 'Fetching injury report…');
     await fetchInjuries(raw);
-    setStatus('spin', 'AI enriching pitchers & teams (pass 1/2)…');
-    await aiEnrichPitchersTeams(raw);
-    setStatus('spin', 'AI enriching batters (pass 2/2)…');
-    await aiEnrichBatters(raw);
+    // AI enrichment is manual — triggered by the AI Breakdown button only
     S.games = raw.map(g => ({ ...g, edges: computeEdges(g) }));
     S.gameFilter = new Set(S.games.map(g => g.game_id));
     fetchTBSplits(); // async, non-blocking — populates S.tbSplits when ready
@@ -1719,6 +1713,26 @@ async function fetchYRFI(games) {
   S._yrfiFIERACount = Object.keys(spFIERAMap).length;
 }
 
+// Interpolates blue→yellow→red across 0-100 to match the YRFI gradient bar
+function yrfiGradientColor(pct) {
+  const t = Math.max(0, Math.min(100, pct)) / 100;
+  let r, g, b;
+  if (t < 0.5) {
+    // blue (#0a84ff) → yellow (#ffd60a)
+    const s = t / 0.5;
+    r = Math.round(10  + (255 - 10)  * s);
+    g = Math.round(132 + (214 - 132) * s);
+    b = Math.round(255 + (10  - 255) * s);
+  } else {
+    // yellow (#ffd60a) → red (#ff453a)
+    const s = (t - 0.5) / 0.5;
+    r = Math.round(255 + (255 - 255) * s);
+    g = Math.round(214 + (69  - 214) * s);
+    b = Math.round(10  + (58  - 10)  * s);
+  }
+  return `rgb(${r},${g},${b})`;
+}
+
 function renderYRFIStrip() {
   const strip = document.getElementById('yrfiStrip');
   const gs = filteredGames().length ? filteredGames() : S.games;
@@ -1763,7 +1777,7 @@ function renderYRFIStrip() {
 
   dotsEl.innerHTML = dotsWithRow.map(({ g, pct, row }) => {
     const label = `${g.away}@${g.home}`;
-    const col = pct >= 67 ? 'var(--r)' : pct >= 40 ? 'var(--y)' : 'var(--bl)';
+    const col = yrfiGradientColor(pct);
     // Row 0 = bottom of container (nearest bar), rows increase upward
     const bottomPx = row * ROW_PX;
     const fromData = g.yrfi.awayFromData || g.yrfi.homeFromData;
@@ -4298,13 +4312,23 @@ async function generateSlateSummary() {
   const content = document.getElementById('summaryContent');
   modal.style.display = 'flex';
   // CF_WORKER_URL defined at top of script
-  content.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:var(--t3)"><div class="spin"></div> Analyzing today\'s slate…</div>';
-
   const gs = filteredGames().length ? filteredGames() : S.games;
   if (!gs.length) {
     content.innerHTML = '<p style="color:var(--t3)">No slate loaded. Load a date first.</p>';
     return;
   }
+
+  // Run AI enrichment if it hasn't been done yet for this slate
+  if (!S.aiDone.size) {
+    content.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:var(--t3)"><div class="spin"></div> AI enriching pitchers & teams (pass 1/2)…</div>';
+    await aiEnrichPitchersTeams(S.games);
+    content.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:var(--t3)"><div class="spin"></div> AI enriching batters (pass 2/2)…</div>';
+    await aiEnrichBatters(S.games);
+    S.games = S.games.map(g => ({ ...g, edges: computeEdges(g) }));
+    renderView();
+  }
+
+  content.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:var(--t3)"><div class="spin"></div> Analyzing today\'s slate…</div>';
 
   // Build a compact data snapshot to send to Claude
   const games = gs.map(g => {
