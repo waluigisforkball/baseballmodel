@@ -684,7 +684,7 @@ canvas{max-width:100%}
   <div id="slateView" style="display:none">
     <div class="vtabs" id="vtabBar">
       <button class="vt on" data-v="cards">Matchup Cards</button>
-      <button class="vt" data-v="heatmap">🔥 Heatmap</button>
+      <button class="vt" data-v="heatmap">🌍 Big Board</button>
       <button class="vt" data-v="table" id="vtTable">📊 Table</button>
       <button class="vt" data-v="charts" id="vtCharts">📈 Pitcher Charts</button>
       <button class="vt" data-v="edges">Edge Rankings</button>
@@ -782,10 +782,10 @@ const PROXIES = [
   u => `https://thingproxy.freeboard.io/fetch/${u}`,
 ];
 
-function timedFetch(url, ms = 14000) {
+function timedFetch(url, ms = 14000, opts = undefined) {
   return new Promise((resolve, reject) => {
     const tid = setTimeout(() => reject(new Error('Timeout')), ms);
-    fetch(url).then(r => { clearTimeout(tid); resolve(r); }).catch(e => { clearTimeout(tid); reject(e); });
+    fetch(url, opts).then(r => { clearTimeout(tid); resolve(r); }).catch(e => { clearTimeout(tid); reject(e); });
   });
 }
 async function safeFetch(url, ms = 10000) {
@@ -4838,8 +4838,7 @@ function pitchClass(pt) {
   return 'pt-' + (map[pt] || 'OTHER');
 }
 
-// Fetch pitch mix for a pitcher from Baseball Savant
-// Uses the statcast search CSV: player_type=pitcher, player_id, pitch_type grouping
+// Fetch pitch mix for a pitcher from Baseball Savant via Cloudflare Worker proxy
 async function fetchPitcherMix(pitcherId, pitcherHand) {
   if (!pitcherId) return null;
   const cacheKey = pitcherId + '_' + PM.dateRange;
@@ -4847,19 +4846,22 @@ async function fetchPitcherMix(pitcherId, pitcherHand) {
     return PM.cache[cacheKey];
   }
 
-  const season = activeStatsSeason(S.date || todayISO());
-  const endDate = S.statsEnd || todayISO();
+  const season    = activeStatsSeason(S.date || todayISO());
+  const endDate   = S.statsEnd || todayISO();
   const startDate = S.statsStart || addDays(endDate, -PM.dateRange);
 
-  // Savant search endpoint — grouped by pitch type
-  const url = `https://baseballsavant.mlb.com/statcast_search/csv?hfSeason=${season}%7C&player_type=pitcher&pitchers_lookup%5B%5D=${pitcherId}&hfGT=R%7C&group_by=name-pitch-type&hfAB=&hfBBT=&hfBBL=&hfC=&minmax=lt&min_pitches=0&min_results=0&min_pas=0&chkBo=&sort_col=pitches&player_event_sort=api_p_release_speed&sort_order=desc&type=details&game_date_lt=${endDate}&game_date_gt=${startDate}`;
+  const savantUrl = `https://baseballsavant.mlb.com/statcast_search/csv?hfSeason=${season}%7C&player_type=pitcher&pitchers_lookup%5B%5D=${pitcherId}&hfGT=R%7C&group_by=name-pitch-type&min_pitches=0&min_results=0&min_pas=0&sort_col=pitches&sort_order=desc&type=details&game_date_lt=${endDate}&game_date_gt=${startDate}`;
 
   try {
-    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-    const r = await timedFetch(proxyUrl, 20000);
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const txt = await r.text();
-    const mix = parseSavantPitchMix(txt, pitcherId);
+    const r = await timedFetch(CF_WORKER_URL, 25000, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'savant-fetch', url: savantUrl }),
+    });
+    if (!r.ok) throw new Error('Worker HTTP ' + r.status);
+    const data = await r.json();
+    if (!data.text) throw new Error('No text in worker response');
+    const mix = parseSavantPitchMix(data.text, pitcherId);
     if (!mix || !mix.length) return null;
     const result = { pitcherId, pitcherHand, mix, fetchedAt: Date.now() };
     PM.cache[cacheKey] = result;
@@ -4904,21 +4906,23 @@ function parseSavantPitchMix(csvText, pitcherId) {
     .sort((a, b) => b.cnt - a.cnt);
 }
 
-// Fetch batter stats vs a specific pitch type from a specific pitcher hand
-// Uses Savant batter search grouped by pitch type
+// Fetch batter stats vs a specific pitch type from a specific pitcher hand via Worker
 async function fetchBatterVsPitch(batterId, pitchType, pitcherHand, season, startDate, endDate) {
   const cacheKey = `${batterId}_${pitchType}_${pitcherHand}_${startDate}`;
   if (PM.batterCache[cacheKey]) return PM.batterCache[cacheKey];
 
-  // p_throws = pitcher hand; pitch_type = pitch type code; batter = batter id
-  const url = `https://baseballsavant.mlb.com/statcast_search/csv?hfSeason=${season}%7C&player_type=batter&batters_lookup%5B%5D=${batterId}&hfGT=R%7C&pitch_type=${pitchType}%7C&p_throws=${pitcherHand}%7C&group_by=name&hfAB=&hfBBT=&hfBBL=&hfC=&minmax=lt&min_pitches=0&min_results=0&min_pas=0&sort_col=pitches&sort_order=desc&type=details&game_date_lt=${endDate}&game_date_gt=${startDate}`;
+  const savantUrl = `https://baseballsavant.mlb.com/statcast_search/csv?hfSeason=${season}%7C&player_type=batter&batters_lookup%5B%5D=${batterId}&hfGT=R%7C&pitch_type=${pitchType}%7C&p_throws=${pitcherHand}%7C&group_by=name&min_pitches=0&min_results=0&min_pas=0&sort_col=pitches&sort_order=desc&type=details&game_date_lt=${endDate}&game_date_gt=${startDate}`;
 
   try {
-    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-    const r = await timedFetch(proxyUrl, 18000);
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const txt = await r.text();
-    const result = parseSavantBatterRow(txt);
+    const r = await timedFetch(CF_WORKER_URL, 20000, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'savant-fetch', url: savantUrl }),
+    });
+    if (!r.ok) throw new Error('Worker HTTP ' + r.status);
+    const data = await r.json();
+    if (!data.text) throw new Error('No text in worker response');
+    const result = parseSavantBatterRow(data.text);
     if (result) PM.batterCache[cacheKey] = result;
     return result;
   } catch (e) {
