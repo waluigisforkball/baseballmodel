@@ -380,6 +380,60 @@ body{background:var(--bg);color:var(--t);font-family:var(--fb);font-size:15px;li
   .ctrl-bar{gap:8px}
 }
 
+/* ─── PITCH MASH TAB ─── */
+.pm-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 0 14px;flex-wrap:wrap}
+.pm-title{font-size:15px;font-weight:500;color:var(--t)}
+.pm-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pm-threshold{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--t3)}
+.pm-threshold input[type=range]{width:80px;accent-color:var(--g)}
+.pm-threshold span{font-family:var(--fm);color:var(--g);font-size:11px;font-weight:600;min-width:30px}
+.pm-legend{display:flex;align-items:center;gap:12px;font-size:10px;color:var(--t3)}
+.pm-leg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+.pm-table-wrap{overflow-x:auto}
+.pm-table{width:100%;border-collapse:collapse;font-size:12px}
+.pm-table thead th{
+  padding:6px 10px;text-align:left;font-size:9px;font-weight:700;
+  letter-spacing:.8px;color:var(--t3);text-transform:uppercase;
+  background:var(--bg3);border-bottom:2px solid var(--b2);white-space:nowrap;
+}
+.pm-table thead th.num{text-align:center}
+.pm-table tbody tr{border-bottom:1px solid var(--b1);cursor:pointer;transition:background .1s}
+.pm-table tbody tr:hover{background:var(--bg3)}
+.pm-table tbody td{padding:0}
+.pm-row-main{display:grid;grid-template-columns:28px 2fr 1.4fr 80px 80px 80px 80px 80px 120px;align-items:center;gap:0;padding:10px 10px}
+.pm-rank{font-family:var(--fm);font-size:11px;color:var(--t3);text-align:center}
+.pm-batter-cell{display:flex;flex-direction:column;gap:2px}
+.pm-batter-name{font-weight:600;font-size:13px;color:var(--t)}
+.pm-batter-meta{font-size:10px;color:var(--t3)}
+.pm-pitcher-cell{display:flex;flex-direction:column;gap:2px}
+.pm-pitcher-name{font-size:11px;font-weight:600;color:var(--t2)}
+.pm-pitch-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:var(--r1);font-size:9px;font-weight:700;letter-spacing:.5px;margin-top:2px;width:fit-content}
+.pm-stat-cell{text-align:center;font-family:var(--fm);font-size:11px;font-weight:600;color:var(--t2);padding:0 4px}
+.pm-score-cell{display:flex;flex-direction:column;align-items:center;gap:4px;padding:0 8px}
+.pm-score-val{font-family:var(--fd);font-size:20px;font-weight:600}
+.pm-score-bar{width:100%;height:3px;background:var(--b1);border-radius:2px;overflow:hidden}
+.pm-score-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--g),var(--pu))}
+
+.pm-pitcher-row{background:var(--bg2);border-bottom:1px solid var(--b1)}
+.pm-pitcher-hdr{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg3);border-bottom:1px solid var(--b1)}
+.pm-pitcher-hdr-name{font-weight:700;font-size:12px}
+.pm-pitch-usage{display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap}
+.pm-pitch-pill{padding:2px 8px;border-radius:10px;font-size:9px;font-weight:700;letter-spacing:.5px}
+
+.pm-empty{text-align:center;padding:48px 20px;color:var(--t3);font-size:13px}
+.pm-loading-row{display:flex;align-items:center;gap:8px;padding:12px 14px;font-size:12px;color:var(--t3)}
+
+/* pitch type color map */
+.pt-FF,.pt-FA{background:rgba(255,69,58,.15);color:#ff453a;border:1px solid rgba(255,69,58,.3)}
+.pt-SI{background:rgba(255,159,10,.15);color:#ff9f0a;border:1px solid rgba(255,159,10,.3)}
+.pt-FC{background:rgba(255,214,10,.15);color:#8a6a00;border:1px solid rgba(255,214,10,.3)}
+.pt-SL,.pt-ST{background:rgba(10,132,255,.15);color:#0a84ff;border:1px solid rgba(10,132,255,.3)}
+.pt-CU,.pt-KC{background:rgba(191,90,242,.15);color:#bf5af2;border:1px solid rgba(191,90,242,.3)}
+.pt-CH{background:rgba(90,200,250,.15);color:#5ac8fa;border:1px solid rgba(90,200,250,.3)}
+.pt-FS{background:rgba(147,51,234,.15);color:#9333ea;border:1px solid rgba(147,51,234,.3)}
+.pt-OTHER{background:rgba(255,255,255,.08);color:var(--t3);border:1px solid var(--b1)}
+
 /* ─── MODE TOGGLE ─── */
 .mode-toggle{display:flex;background:var(--bg3);border:1px solid var(--b1);border-radius:var(--r1);overflow:hidden;flex-shrink:0;padding:2px;gap:2px}
 .mode-btn{background:none;border:none;padding:5px 16px;border-radius:6px;font-family:var(--fb);font-size:13px;font-weight:500;cursor:pointer;color:var(--t3);transition:all .14s;white-space:nowrap}
@@ -636,6 +690,7 @@ canvas{max-width:100%}
       <button class="vt" data-v="edges">Edge Rankings</button>
       <button class="vt" data-v="dfs" id="vtDfs" style="display:none;color:var(--pu)">💰 DFS</button>
       <button class="vt" data-v="tb" id="vtTB">🎯 TB Targets</button>
+      <button class="vt" data-v="pitchmash" id="vtPitchMash">🔥 Pitch Mash</button>
       <button class="btn" id="dfsUploadTabBtn" onclick="document.getElementById('dfsFileInput').click()" style="display:none;margin-left:auto;background:var(--pu);font-size:11px;padding:4px 13px">📂 Upload DK Salaries</button>
     </div>
     <div id="cardsView" class="cgrid"></div>
@@ -647,6 +702,7 @@ canvas{max-width:100%}
     <div id="edgesView" style="display:none"><div class="egrid" id="egrid"></div></div>
     <div id="dfsView" style="display:none"></div>
     <div id="tbView" style="display:none"></div>
+    <div id="pitchmashView" style="display:none"></div>
   </div>
   <div id="gameDetail" style="display:none">
     <button class="bkbtn" id="backBtn">← Back to Slate</button>
@@ -2619,14 +2675,16 @@ function renderView() {
   showEl('edgesView',   S.view==='edges');
   showEl('dfsView',     S.view==='dfs');
   showEl('tbView',      S.view==='tb');
+  showEl('pitchmashView', S.view==='pitchmash');
   renderYRFIStrip(); // re-renders when game filter changes
-  if      (S.view==='cards')   renderCards();
-  else if (S.view==='heatmap') renderHeatmap();
-  else if (S.view==='table')   renderTable();
-  else if (S.view==='charts')  renderCharts();
-  else if (S.view==='edges')   renderEdges();
-  else if (S.view==='dfs')     renderDFS();
-  else if (S.view==='tb')      renderTB();
+  if      (S.view==='cards')     renderCards();
+  else if (S.view==='heatmap')   renderHeatmap();
+  else if (S.view==='table')     renderTable();
+  else if (S.view==='charts')    renderCharts();
+  else if (S.view==='edges')     renderEdges();
+  else if (S.view==='dfs')       renderDFS();
+  else if (S.view==='tb')        renderTB();
+  else if (S.view==='pitchmash') renderPitchMash();
 }
 
 // ─── CARDS ───
@@ -4751,6 +4809,428 @@ function renderTB() {
       ${dataNote}
     </div>
     ${topCards}${lowSection}`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// PITCH MASH TAB
+// ─────────────────────────────────────────────────────────────
+
+// Pitch Mash state
+const PM = {
+  results: [],       // computed matchup rows
+  loading: false,
+  loaded: false,
+  threshold: 40,     // minimum pitch usage % to qualify
+  dateRange: 30,     // days window (mirrors S.days)
+  cache: {},         // pitcher_id → {pitchMix, fetchedAt}
+  batterCache: {},   // "playerId_pitchType_pitcherHand" → savant row
+};
+
+// Pitch type display names and color classes
+const PITCH_LABELS = {
+  'FF':'4-Seam FB','FA':'4-Seam FB','SI':'Sinker','FC':'Cutter',
+  'SL':'Slider','ST':'Sweeper','CU':'Curveball','KC':'Knuckle-Curve',
+  'CH':'Changeup','FS':'Splitter','CS':'Slow Curve','KN':'Knuckleball',
+};
+function pitchLabel(pt) { return PITCH_LABELS[pt] || pt; }
+function pitchClass(pt) {
+  const map = {FF:'FF',FA:'FF',SI:'SI',FC:'FC',SL:'SL',ST:'ST',CU:'CU',KC:'CU',CH:'CH',FS:'FS'};
+  return 'pt-' + (map[pt] || 'OTHER');
+}
+
+// Fetch pitch mix for a pitcher from Baseball Savant
+// Uses the statcast search CSV: player_type=pitcher, player_id, pitch_type grouping
+async function fetchPitcherMix(pitcherId, pitcherHand) {
+  if (!pitcherId) return null;
+  const cacheKey = pitcherId + '_' + PM.dateRange;
+  if (PM.cache[cacheKey] && (Date.now() - PM.cache[cacheKey].fetchedAt) < 3600000) {
+    return PM.cache[cacheKey];
+  }
+
+  const season = activeStatsSeason(S.date || todayISO());
+  const endDate = S.statsEnd || todayISO();
+  const startDate = S.statsStart || addDays(endDate, -PM.dateRange);
+
+  // Savant search endpoint — grouped by pitch type
+  const url = `https://baseballsavant.mlb.com/statcast_search/csv?hfSeason=${season}%7C&player_type=pitcher&pitchers_lookup%5B%5D=${pitcherId}&hfGT=R%7C&group_by=name-pitch-type&hfAB=&hfBBT=&hfBBL=&hfC=&minmax=lt&min_pitches=0&min_results=0&min_pas=0&chkBo=&sort_col=pitches&player_event_sort=api_p_release_speed&sort_order=desc&type=details&game_date_lt=${endDate}&game_date_gt=${startDate}`;
+
+  try {
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+    const r = await timedFetch(proxyUrl, 20000);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const txt = await r.text();
+    const mix = parseSavantPitchMix(txt, pitcherId);
+    if (!mix || !mix.length) return null;
+    const result = { pitcherId, pitcherHand, mix, fetchedAt: Date.now() };
+    PM.cache[cacheKey] = result;
+    return result;
+  } catch (e) {
+    console.warn('Savant pitch mix fetch failed for', pitcherId, e.message);
+    return null;
+  }
+}
+
+// Parse Savant CSV into pitch type usage array
+function parseSavantPitchMix(csvText, pitcherId) {
+  if (!csvText || csvText.trim().startsWith('<')) return null; // HTML error page
+  const lines = csvText.trim().split('\n').filter(l => l.trim());
+  if (lines.length < 2) return null;
+
+  const header = lines[0].split(',').map(h => h.replace(/"/g,'').trim().toLowerCase());
+  const pitchTypeIdx = header.findIndex(h => h === 'pitch_type' || h === 'pitch_name');
+  const pitchesIdx   = header.findIndex(h => h === 'pitches' || h === 'n' || h === 'count');
+  const releaseIdx   = header.findIndex(h => h.includes('release_speed') || h === 'avg_speed');
+
+  if (pitchTypeIdx < 0) return null;
+
+  const rows = [];
+  let totalPitches = 0;
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCSVLine(lines[i]);
+    const pt   = (cols[pitchTypeIdx] || '').replace(/"/g,'').trim().toUpperCase();
+    if (!pt || pt === 'UN' || pt === 'PO' || pt === 'IN') continue;
+    const cnt  = parseInt(cols[pitchesIdx]) || 0;
+    const spd  = parseFloat(cols[releaseIdx]) || null;
+    totalPitches += cnt;
+    rows.push({ pt, cnt, spd });
+  }
+
+  if (!totalPitches) return null;
+
+  // Compute usage percentages
+  return rows
+    .map(r => ({ ...r, pct: Math.round((r.cnt / totalPitches) * 100) }))
+    .sort((a, b) => b.cnt - a.cnt);
+}
+
+// Fetch batter stats vs a specific pitch type from a specific pitcher hand
+// Uses Savant batter search grouped by pitch type
+async function fetchBatterVsPitch(batterId, pitchType, pitcherHand, season, startDate, endDate) {
+  const cacheKey = `${batterId}_${pitchType}_${pitcherHand}_${startDate}`;
+  if (PM.batterCache[cacheKey]) return PM.batterCache[cacheKey];
+
+  // p_throws = pitcher hand; pitch_type = pitch type code; batter = batter id
+  const url = `https://baseballsavant.mlb.com/statcast_search/csv?hfSeason=${season}%7C&player_type=batter&batters_lookup%5B%5D=${batterId}&hfGT=R%7C&pitch_type=${pitchType}%7C&p_throws=${pitcherHand}%7C&group_by=name&hfAB=&hfBBT=&hfBBL=&hfC=&minmax=lt&min_pitches=0&min_results=0&min_pas=0&sort_col=pitches&sort_order=desc&type=details&game_date_lt=${endDate}&game_date_gt=${startDate}`;
+
+  try {
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+    const r = await timedFetch(proxyUrl, 18000);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const txt = await r.text();
+    const result = parseSavantBatterRow(txt);
+    if (result) PM.batterCache[cacheKey] = result;
+    return result;
+  } catch (e) {
+    console.warn('Savant batter split fetch failed', batterId, e.message);
+    return null;
+  }
+}
+
+// Parse a single aggregated row from Savant batter CSV
+function parseSavantBatterRow(csvText) {
+  if (!csvText || csvText.trim().startsWith('<')) return null;
+  const lines = csvText.trim().split('\n').filter(l => l.trim());
+  if (lines.length < 2) return null;
+
+  const header = lines[0].split(',').map(h => h.replace(/"/g,'').trim().toLowerCase());
+  // Find key stat columns
+  const idx = (names) => {
+    for (const n of names) {
+      const i = header.findIndex(h => h === n);
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+
+  const pitchesIdx  = idx(['pitches','n','count']);
+  const wOBAIdx     = idx(['woba','estimated_woba_using_speedangle','woba_value']);
+  const xwOBAIdx    = idx(['estimated_woba_using_speedangle','xwoba','est_woba']);
+  const hhIdx       = idx(['launch_speed_angle','hard_hit_pct','hard_hit','hh_pct']);
+  const barrelIdx   = idx(['barrel_batted_rate','barrel_pct','barrel','barrels_per_bbe','barrels_per_pa']);
+  const whiffIdx    = idx(['whiff_pct','whiff_rate','swstr_pct','swing_miss_pct']);
+  const paIdx       = idx(['pa','plate_appearances','pas']);
+
+  const cols = parseCSVLine(lines[1]);
+  const get  = (i) => i >= 0 ? parseFloat(cols[i]) : null;
+
+  const pitches = parseInt(cols[pitchesIdx]) || 0;
+  if (pitches < 5) return null; // too few pitches to be meaningful
+
+  return {
+    pitches,
+    pa:       get(paIdx),
+    woba:     get(wOBAIdx),
+    xwoba:    get(xwOBAIdx),
+    hh_pct:   get(hhIdx),
+    barrel:   get(barrelIdx),
+    whiff:    get(whiffIdx),
+  };
+}
+
+// Compute Pitch Mash score (0-100) from savant split stats
+// Weights: wOBA 30%, xwOBA 25%, HH% 20%, Barrel% 15%, Whiff%(inv) 10%
+function computePitchMash(stats) {
+  if (!stats) return null;
+
+  // Normalize each metric to 0-1 scale with realistic MLB ranges
+  function norm(val, lo, hi, invert) {
+    if (val == null || isNaN(val)) return null;
+    let n = Math.min(1, Math.max(0, (val - lo) / (hi - lo)));
+    return invert ? 1 - n : n;
+  }
+
+  const n_woba   = norm(stats.woba,   0.200, 0.500);      // 30%
+  const n_xwoba  = norm(stats.xwoba,  0.200, 0.500);      // 25%
+  const n_hh     = norm(stats.hh_pct, 20,    60);          // 20%
+  const n_barrel = norm(stats.barrel, 0,     20);          // 15%
+  const n_whiff  = norm(stats.whiff,  5,     50, true);    // 10% inverted
+
+  const weights = [[n_woba,0.30],[n_xwoba,0.25],[n_hh,0.20],[n_barrel,0.15],[n_whiff,0.10]];
+  let score = 0, totalW = 0;
+  for (const [val, w] of weights) {
+    if (val != null) { score += val * w; totalW += w; }
+  }
+  if (!totalW) return null;
+  return Math.round((score / totalW) * 100);
+}
+
+// Main Pitch Mash compute — iterates today's slate
+async function computePitchMashMatchups() {
+  if (!S.games.length) return [];
+  PM.loading = true;
+  PM.results = [];
+
+  const season    = activeStatsSeason(S.date || todayISO());
+  const endDate   = S.statsEnd || todayISO();
+  const startDate = S.statsStart || addDays(endDate, -PM.dateRange);
+
+  const el = document.getElementById('pitchmashView');
+
+  // Collect all unique pitchers
+  const pitchers = [];
+  for (const g of filteredGames()) {
+    for (const [sp, lu, myTeam, oppTeam, isAway] of [
+      [g.asp, g.home_lu, g.away, g.home, true],
+      [g.hsp, g.away_lu, g.home, g.away, false],
+    ]) {
+      const spId = isAway ? g.away_sp_id : g.home_sp_id;
+      if (!spId || sp.name === 'TBD') continue;
+      pitchers.push({ sp, spId, lu, myTeam, oppTeam, isAway, g });
+    }
+  }
+
+  // Fetch pitch mixes in parallel (one per pitcher)
+  el.innerHTML = `<div class="pm-loading-row"><div class="spin"></div> Fetching Statcast pitch mix for ${pitchers.length} pitchers…</div>`;
+
+  const mixResults = await Promise.allSettled(
+    pitchers.map(p => fetchPitcherMix(p.spId, p.sp.hand || 'R'))
+  );
+
+  // For each pitcher with a dominant pitch, fetch batter splits
+  const matchupPromises = [];
+  for (let i = 0; i < pitchers.length; i++) {
+    const { sp, spId, lu, myTeam, oppTeam, isAway, g } = pitchers[i];
+    const mix = mixResults[i].status === 'fulfilled' ? mixResults[i].value : null;
+    if (!mix) continue;
+
+    // Find dominant pitch(es) above threshold
+    const dominant = mix.mix.filter(m => m.pct >= PM.threshold);
+    if (!dominant.length) continue;
+    const topPitch = dominant[0]; // primary dominant pitch
+
+    // For each batter in the opposing lineup
+    for (const batter of lu) {
+      if (!batter.player_id || !batter.name) continue;
+      matchupPromises.push(
+        fetchBatterVsPitch(batter.player_id, topPitch.pt, sp.hand || 'R', season, startDate, endDate)
+          .then(stats => ({
+            batter, sp, spId, topPitch, mix: mix.mix,
+            myTeam, oppTeam, isAway, g,
+            stats,
+            mash: computePitchMash(stats),
+          }))
+      );
+    }
+  }
+
+  if (matchupPromises.length) {
+    el.innerHTML = `<div class="pm-loading-row"><div class="spin"></div> Fetching batter splits vs dominant pitch type… (${matchupPromises.length} matchups)</div>`;
+  }
+
+  const matchupResults = await Promise.allSettled(matchupPromises);
+  const matchups = matchupResults
+    .filter(r => r.status === 'fulfilled' && r.value.mash != null)
+    .map(r => r.value)
+    .sort((a, b) => b.mash - a.mash);
+
+  PM.results   = matchups;
+  PM.loading   = false;
+  PM.loaded    = true;
+  return matchups;
+}
+
+async function renderPitchMash() {
+  const el = document.getElementById('pitchmashView');
+  if (!el) return;
+
+  if (!S.games.length) {
+    el.innerHTML = `<div class="pm-empty">Load a slate to see Pitch Mash matchups.</div>`;
+    return;
+  }
+
+  // Show loading state immediately, then compute
+  if (!PM.loaded || PM.dateRange !== S.days) {
+    PM.dateRange = S.days;
+    PM.loaded = false;
+    el.innerHTML = `<div class="pm-loading-row"><div class="spin"></div> Initializing Pitch Mash… fetching Statcast data from Baseball Savant</div>`;
+    await computePitchMashMatchups();
+  }
+
+  const matchups = PM.results;
+
+  // Controls bar
+  const controlsHtml = `
+    <div class="pm-header">
+      <div>
+        <div class="pm-title">🔥 Pitch Mash</div>
+        <div style="font-size:11px;color:var(--t3);margin-top:2px">Batters ranked by Pitch Mash score vs today's pitcher dominant pitch type · Statcast splits</div>
+      </div>
+      <div class="pm-controls">
+        <div class="pm-threshold">
+          <span>Min usage:</span>
+          <input type="range" id="pmThresh" min="25" max="65" step="5" value="${PM.threshold}">
+          <span id="pmThreshVal">${PM.threshold}%</span>
+        </div>
+        <button class="apply-btn" id="pmRefresh" style="font-size:10px">↺ Refresh</button>
+      </div>
+    </div>`;
+
+  if (!matchups.length) {
+    el.innerHTML = controlsHtml + `<div class="pm-empty">
+      No dominant pitch matchups found with ≥${PM.threshold}% usage threshold.<br>
+      <span style="font-size:11px;color:var(--t3);margin-top:6px;display:block">Savant data may be unavailable for today's pitchers, or try lowering the usage threshold.</span>
+    </div>`;
+    bindPMControls();
+    return;
+  }
+
+  // Build table
+  const maxMash = matchups[0]?.mash || 100;
+
+  function statCell(val, lo, hi, fmt) {
+    if (val == null || isNaN(val)) return `<div class="pm-stat-cell" style="color:var(--t3)">—</div>`;
+    const norm = Math.min(1, Math.max(0, (val - lo) / (hi - lo)));
+    const col  = norm > 0.65 ? 'var(--pu)' : norm > 0.45 ? 'var(--g)' : norm < 0.25 ? 'var(--t3)' : 'var(--t2)';
+    return `<div class="pm-stat-cell" style="color:${col}">${fmt(val)}</div>`;
+  }
+
+  function whiffCell(val) {
+    // Whiff is inverted — low = good for batter
+    if (val == null || isNaN(val)) return `<div class="pm-stat-cell" style="color:var(--t3)">—</div>`;
+    const norm = 1 - Math.min(1, Math.max(0, (val - 5) / 45));
+    const col  = norm > 0.65 ? 'var(--pu)' : norm > 0.45 ? 'var(--g)' : 'var(--t3)';
+    return `<div class="pm-stat-cell" style="color:${col}">${val.toFixed(1)}%</div>`;
+  }
+
+  const rows = matchups.map((m, i) => {
+    const { batter, sp, topPitch, mix, g, stats, mash, myTeam, oppTeam, isAway } = m;
+    const mashPct = Math.round((mash / maxMash) * 100);
+    const mashCol = mash >= 75 ? 'var(--pu)' : mash >= 55 ? 'var(--g)' : mash >= 35 ? 'var(--y)' : 'var(--t2)';
+    const bHand   = batter.hand || 'R';
+    const platAdv = (bHand === 'L' && sp.hand === 'R') || (bHand === 'R' && sp.hand === 'L');
+
+    // Build pitch mix pills (top 3)
+    const topMix = mix.slice(0, 3).map(p =>
+      `<span class="pm-pitch-pill ${pitchClass(p.pt)}">${pitchLabel(p.pt)} ${p.pct}%</span>`
+    ).join('');
+
+    return `<tr data-game="${g.game_id}">
+      <td colspan="9" style="padding:0">
+        <div class="pm-row-main">
+          <div class="pm-rank">${i + 1}</div>
+          <div class="pm-batter-cell">
+            <div class="pm-batter-name">
+              ${batter.name}
+              ${platAdv ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(147,51,234,.15);color:var(--pu);margin-left:4px">PLAT</span>' : ''}
+            </div>
+            <div class="pm-batter-meta">
+              ${myTeam} · <span class="hb h${bHand}">${bHand}</span>
+              · vs <span class="pm-pitch-badge ${pitchClass(topPitch.pt)}">${pitchLabel(topPitch.pt)} ${topPitch.pt} ${topPitch.pct}%</span>
+              from ${sp.hand}HP
+            </div>
+          </div>
+          <div class="pm-pitcher-cell">
+            <div class="pm-pitcher-name">${sp.name || 'TBD'}</div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">${topMix}</div>
+          </div>
+          ${statCell(stats?.woba,   0.200, 0.500, v => v.toFixed(3))}
+          ${statCell(stats?.xwoba,  0.200, 0.500, v => v.toFixed(3))}
+          ${statCell(stats?.hh_pct, 20,    60,    v => v.toFixed(1)+'%')}
+          ${statCell(stats?.barrel, 0,     20,    v => v.toFixed(1)+'%')}
+          ${whiffCell(stats?.whiff)}
+          <div class="pm-score-cell">
+            <div class="pm-score-val" style="color:${mashCol}">${mash}</div>
+            <div class="pm-score-bar"><div class="pm-score-fill" style="width:${mashPct}%"></div></div>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = controlsHtml + `
+    <div class="pm-table-wrap">
+      <table class="pm-table">
+        <thead>
+          <tr>
+            <th style="width:28px">#</th>
+            <th>Batter</th>
+            <th>Pitcher · Dominant Pitch</th>
+            <th class="num">wOBA</th>
+            <th class="num">xwOBA</th>
+            <th class="num">HH%</th>
+            <th class="num">Barrel%</th>
+            <th class="num">Whiff%↓</th>
+            <th class="num">Pitch Mash</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="padding:10px 4px;font-size:10px;color:var(--t3);display:flex;gap:16px;flex-wrap:wrap;margin-top:4px">
+      <span><b style="color:var(--pu)">Pitch Mash</b> = wOBA 30% + xwOBA 25% + HH% 20% + Barrel% 15% + Whiff%(inv) 10% · Statcast ${S.statsStart} → ${S.statsEnd}</span>
+      <span><b style="color:var(--pu)">PLAT</b> = platoon advantage (batter/pitcher handedness mismatch)</span>
+      <span>Whiff%↓ = lower is better for batter (more contact)</span>
+    </div>`;
+
+  bindPMControls();
+
+  // Row click → game detail
+  el.querySelectorAll('tr[data-game]').forEach(row => {
+    row.addEventListener('click', () => showDetail(row.dataset.game));
+  });
+}
+
+function bindPMControls() {
+  const thresh = document.getElementById('pmThresh');
+  const threshVal = document.getElementById('pmThreshVal');
+  const refresh = document.getElementById('pmRefresh');
+
+  if (thresh) {
+    thresh.addEventListener('input', () => {
+      PM.threshold = +thresh.value;
+      if (threshVal) threshVal.textContent = PM.threshold + '%';
+    });
+  }
+  if (refresh) {
+    refresh.addEventListener('click', () => {
+      PM.loaded = false;
+      PM.results = [];
+      PM.cache = {};
+      PM.batterCache = {};
+      renderPitchMash();
+    });
+  }
 }
 
 </script>
