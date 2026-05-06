@@ -545,7 +545,7 @@ canvas{max-width:100%}
   </div>
   <div class="ctrl-divider"></div>
   <div class="sl-group">
-    <span class="sl-lbl">Odds Weight:</span>
+    <span class="sl-lbl" title="Affects the Edges tab composite score only">Edges Odds Wt:</span>
     <div class="sl-wrap">
       <div class="sl-track"></div>
       <div class="sl-fill" id="oddsFill"></div>
@@ -774,7 +774,10 @@ const WX_BASE    = 'https://api.open-meteo.com/v1/forecast';
 const ODDS_BASE  = 'https://api.the-odds-api.com/v4';
 const CF_WORKER_URL = 'https://anthropickey.billywitchdoctordfs.workers.dev';
 
-// Proxy list — tried in order, first success wins
+// Proxy list — third-party fallbacks only. Cloudflare Worker is the primary channel
+// and is tried first inside proxyFetch(). These exist so the app degrades to *something*
+// if the Worker is down, but they are unreliable (rate limits, service disappearance,
+// Baseball Savant blocks them entirely).
 const PROXIES = [
   u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
   u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
@@ -794,26 +797,40 @@ async function safeFetch(url, ms = 10000) {
   return r.json();
 }
 async function proxyFetch(url) {
-  // Try direct first (works in some environments)
+  // 1. Cloudflare Worker first — most reliable, no rate limits, we control it
   try {
-    const r = await timedFetch(url, 7000);
+    const r = await timedFetch(CF_WORKER_URL, 10000, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'mlb-proxy', url })
+    });
     if (r.ok) {
       const txt = await r.text();
-      if (txt && txt.trim()) return JSON.parse(txt);
+      if (txt && txt.trim()) {
+        const parsed = JSON.parse(txt);
+        // Worker may wrap response; unwrap if needed
+        if (parsed && typeof parsed === 'object' && 'data' in parsed && !('copyright' in parsed)) {
+          return parsed.data;
+        }
+        return parsed;
+      }
     }
-  } catch {}
-  // Try each proxy in sequence
+  } catch (e) {
+    console.warn('Worker proxy failed, falling back:', e.message);
+  }
+
+  // 2. Third-party CORS proxies — last-resort fallback only
   let lastErr;
   for (const proxyFn of PROXIES) {
     try {
-      const r = await timedFetch(proxyFn(url), 14000);
+      const r = await timedFetch(proxyFn(url), 10000);
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const txt = await r.text();
       if (!txt || txt.trim() === '') throw new Error('empty');
       return JSON.parse(txt);
     } catch (e) { lastErr = e; }
   }
-  throw new Error('MLB API unreachable after 4 proxies. Last: ' + (lastErr?.message || 'unknown'));
+  throw new Error('MLB API unreachable (Worker + 4 fallback proxies failed). Last: ' + (lastErr?.message || 'unknown'));
 }
 
 // ─── PARK FACTORS ───
@@ -1133,7 +1150,7 @@ async function load(date) {
     if (S._injuries?.length) chips.push({cls:'err',txt:'IL: '+S._injuries.length+' players'});
     const winLabel = S.activePreset==='season'?'This Season':S.activePreset==='lastseason'?'Last Season':S.activePreset==='custom'?(S.statsStart+'→'+S.statsEnd):('Last '+S.days+'d');
     chips.push({cls:'',txt:'Window: '+winLabel});
-    chips.push({cls:S.oddsWt>0?'odds':'',txt:'Odds Wt: '+S.oddsWt+'%'});
+    chips.push({cls:S.oddsWt>0?'odds':'',txt:'Edges Odds Wt: '+S.oddsWt+'%'});
     setChips(chips);
     setStatus('ok', raw.length + ' games loaded');
   } catch(e) {
@@ -4467,108 +4484,168 @@ function showGuide() {
       icon: '🚀',
       title: 'Getting Started',
       color: 'var(--g)',
-      body: `<p>Waluigi's Forkball loads automatically each time you open it. Use the <b style="color:var(--t)">date picker</b> at the top or the <b style="color:var(--t)">← →</b> arrows to move between days. Click <b style="color:var(--t)">TODAY</b> to jump back to the current date. The app will fetch the day's schedule, probable pitchers, stats, weather, and live betting odds all at once — this usually takes 15–30 seconds.</p>
-<p style="margin-top:8px">The <b style="color:var(--y)">Stats Window</b> bar lets you control how much historical data feeds the calculations. <b>Last Month</b> is the default and works well for current-form analysis. Use <b>This Season</b> for larger sample sizes on props, or <b>Last 2 Weeks</b> if you want a hot-streak focus.</p>`
+      body: `<p>Waluigi's Forkball loads automatically each time you open it. Use the <b style="color:var(--t)">date picker</b> at the top or the <b style="color:var(--t)">← →</b> arrows to move between days. Click <b style="color:var(--t)">TODAY</b> to jump back to the current date. The app fetches the day's schedule, probable pitchers, stats, weather, individual player splits, and live betting odds — this usually takes 15–30 seconds.</p>
+<p style="margin-top:8px">The <b style="color:var(--y)">Stats Window</b> bar controls how much historical data feeds the calculations. <b>Last Month</b> is the default. Use <b>This Season</b> for larger sample sizes (best mid-April onward), or <b>Last 2 Weeks</b> for a hot-streak focus.</p>
+<p style="margin-top:8px"><b style="color:var(--pu)">AI Slate Breakdown</b> is now a manual trigger — click the <b>✦ Slate Breakdown</b> button when you want player enrichment notes. This keeps API costs predictable rather than running on every load.</p>`
+    },
+    {
+      icon: '📍',
+      title: 'YRFI Strip (Top of Page)',
+      color: 'var(--bl)',
+      body: `<p>The colored strip below the controls is the <b style="color:var(--t)">YRFI dashboard</b> — Yes Run First Inning probability for every game on the slate. Each dot is a game, positioned along a <b style="color:#0a84ff">blue → </b><b style="color:#ffd60a">yellow → </b><b style="color:#ff453a">red</b> gradient.</p>
+<ul style="margin:8px 0 8px 18px;line-height:2">
+  <li><b style="color:#0a84ff">Blue (left)</b> — Low YRFI%. Strong NRFI lean.</li>
+  <li><b style="color:#ffd60a">Yellow (middle)</b> — Moderate. No strong edge either way.</li>
+  <li><b style="color:#ff453a">Red (right)</b> — High YRFI%. Strong YRFI lean.</li>
+</ul>
+<p>The model blends each team's recent 1st-inning scoring rate (60%) with the opposing starter's vulnerability via BB/9 and WHIP (40%). Hover any dot for the breakdown.</p>`
     },
     {
       icon: '🎲',
       title: 'Betting Mode',
       color: 'var(--y)',
-      body: `<p>Switch to <b style="color:var(--y)">🎲 BETTING</b> mode in the top-right toggle. This mode is built around three core prop types:</p>
+      body: `<p>Switch to <b style="color:var(--y)">🎲 BETTING</b> mode in the top-right toggle. Built around five core prop types:</p>
 <ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b style="color:var(--g)">Pitcher Strikeout props</b> — look for green K Edge scores. A high K edge means the pitcher's K/9 and Chase% align with a lineup that tends to strike out. Best found in the <b>🔥 Heatmap → K Edge</b> view or the <b>Edge Rankings</b> tab.</li>
-  <li><b style="color:var(--o)">HR / Power props</b> — look for orange HR/Power badges. These combine the pitcher's HR/9 and Hard Hit % allowed with the opposing team's ISO and Barrel rate, adjusted for park and wind.</li>
-  <li><b style="color:var(--pu)">Total Bases props</b> — the TB Potential column in the <b>📊 Table</b> view and the TB/SLG heatmap mode. This is the most hand-adjusted stat: it uses each batter's SLG vs the specific pitcher's handedness.</li>
+  <li><b style="color:var(--g)">Strikeout props</b> — high K Edge means the pitcher's K/9 + Chase% align with a high-K lineup. Best in <b>Big Board → K Edge</b> or <b>Pitcher Charts</b>.</li>
+  <li><b style="color:var(--o)">HR / Power props</b> — combines pitcher HR/9 + Hard Hit% allowed with opponent ISO + Barrel rate, adjusted for park and wind.</li>
+  <li><b style="color:var(--pu)">Total Bases props</b> — see the dedicated <b>🎯 TB Targets</b> tab. Most hand-adjusted prop type in the app.</li>
+  <li><b style="color:var(--bl)">YRFI / NRFI</b> — see the YRFI strip at the top of the page.</li>
+  <li><b style="color:var(--r)">Game totals & moneylines</b> — see the <b>Edge Rankings</b> tab for composite scoring.</li>
 </ul>
-<p><b style="color:var(--t)">Handedness is automatic.</b> Every stat you see — K%, SLG, ISO, wOBA — is already split by the pitcher's actual throwing hand vs the opposing lineup's bat side. You never need to manually adjust for lefty/righty matchups.</p>`
+<p><b style="color:var(--t)">Handedness is automatic.</b> Every stat — K%, SLG, ISO, wOBA — is already split by the pitcher's actual throwing hand vs the opposing lineup's bat side.</p>`
     },
     {
-      icon: '🔥',
-      title: 'Heatmap Tab',
+      icon: '🌍',
+      title: 'Big Board Tab',
       color: 'var(--r)',
-      body: `<p>The heatmap shows today's actual matchups only — one row per starting pitcher, facing their real opponent. <b style="color:#7af">Blue cells = cold</b>, <b style="color:#f77">red cells = hot/juicy</b>. The <b>Heat score</b> on the right (0–100) averages across all columns in that mode.</p>
-<p style="margin-top:8px">Use the four mode buttons to switch what the columns show:</p>
+      body: `<p>Full-slate cross-game heatmap — one row per starting pitcher. <b style="color:#7af">Blue cells = cold</b>, <b style="color:#f77">red cells = hot</b>. The <b>Heat score</b> on the right (0–100) averages across all columns in that mode.</p>
+<p style="margin-top:8px">Four mode buttons:</p>
 <ul style="margin:8px 0 8px 18px;line-height:2">
   <li><b style="color:var(--g)">⚡ K Edge</b> — K/9, Chase%, wOBA allowed, opponent K rate. Red = prime K prop target.</li>
-  <li><b style="color:var(--o)">💣 HR Edge</b> — HR/9, Barrel%, Hard Hit%, opponent ISO/SLG, park HR factor, wind. Red = prime HR/power environment.</li>
-  <li><b style="color:var(--pu)">🟣 TB / SLG</b> — Opponent SLG/ISO/wOBA vs pitcher hand, HH%, park run factor, wRC+. Best for total bases props and DFS stack decisions.</li>
+  <li><b style="color:var(--o)">💣 HR Edge</b> — HR/9, Barrel%, Hard Hit%, opponent ISO/SLG, park HR factor, wind. Red = power environment.</li>
+  <li><b style="color:var(--pu)">🟣 TB / SLG</b> — Opponent SLG/ISO/wOBA vs pitcher hand, HH%, park run factor, wRC+. Best for total bases and DFS stacks.</li>
   <li><b style="color:var(--r)">📈 Run Env</b> — ERA, xFIP, GB%, opponent OPS/wRC+, park run factor, temperature. Red = over-friendly environment.</li>
 </ul>
-<p>Click any row to open the full game detail view for that matchup.</p>`
+<p>Click any row to open the full game detail view.</p>`
     },
     {
       icon: '📊',
-      title: 'Sortable Table',
+      title: 'Table Tab',
       color: 'var(--bl)',
-      body: `<p>The table in Betting mode is the most information-dense view. Every column is sortable — click any header to sort ascending or descending. Key columns to pay attention to:</p>
+      body: `<p>Most information-dense view in the app. Every column is sortable — click any header. Key columns:</p>
 <ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b>K/9 vsL / K/9 vsR</b> — pitcher's strikeout rate specifically against left or right-handed batters. Red = low (pitcher struggles), green = high (pitcher dominates).</li>
-  <li><b>Opp K% (hand-adj)</b> — the opposing team's strikeout rate vs this pitcher's specific hand. High = lineup tends to strike out against this type of pitcher.</li>
-  <li><b>Opp SLG / ISO (hand-adj)</b> — offensive power of the opposing lineup specifically against this pitcher's hand. High = power threat.</li>
-  <li><b>TB Pot</b> — total bases potential for the away team, hand-adjusted. Purple = elevated.</li>
-  <li><b>⭐ Score</b> — the composite edge score, blending stats and odds at whatever weight you set with the Odds Weight slider.</li>
+  <li><b>K/9 vsL / K/9 vsR</b> — pitcher K rate against L or R hitters specifically.</li>
+  <li><b>Opp K% (hand-adj)</b> — opposing team's K rate vs this pitcher's specific hand.</li>
+  <li><b>Opp SLG / ISO (hand-adj)</b> — power vs this pitcher's hand.</li>
+  <li><b>TB Pot</b> — total bases potential, hand-adjusted. Purple = elevated.</li>
+  <li><b>⭐ Score</b> — composite edge score. Blends stats and odds via the Edges Odds Wt slider (note: the slider <b>only</b> affects this column and the Edge Rankings tab — every other tab is pure stats).</li>
 </ul>`
     },
     {
       icon: '📈',
-      title: 'Charts Tab',
+      title: 'Pitcher Charts Tab',
       color: 'var(--teal)',
-      body: `<p>Three charts that make the slate scannable at a glance:</p>
+      body: `<p>Three scannable charts that overlay pitcher rates with opponent context as dots:</p>
 <ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b>K/9 vs Opp K%</b> — bar chart with the pitcher's K/9 per game, overlaid with a line showing how much the opposing team strikes out. When both are high at the same time, that's a strong K prop lean.</li>
-  <li><b>HR/9 vs Opp ISO</b> — same concept for home run props. High HR/9 + high opponent ISO = power environment.</li>
-  <li><b>Total Bases Potential</b> — grouped bars comparing away vs home team TB potential across all games. Useful for identifying stack-friendly games.</li>
+  <li><b>K/9 vs Opp K%</b> — pitcher K/9 bars overlaid with opponent K rate dots. Both high = strong K prop lean.</li>
+  <li><b>HR/9 vs Opp ISO</b> — same concept for power props.</li>
+  <li><b>Total Bases Potential</b> — grouped bars comparing away vs home TB potential across all games. Useful for stack-friendly games.</li>
 </ul>`
+    },
+    {
+      icon: '⭐',
+      title: 'Edge Rankings Tab',
+      color: 'var(--y)',
+      body: `<p>Ranked composite scores blending all stat-based edges with optional market input. This is the only tab the <b>Edges Odds Wt</b> slider affects — it shifts the weight between pure model output and market consensus.</p>
+<ul style="margin:8px 0 8px 18px;line-height:2">
+  <li><b>Slider at 0%</b> — pure stat-based ranking. Disagrees with the market often, which is the point.</li>
+  <li><b>Slider at 30–50%</b> — balanced view. Useful when you want sharp money to inform but not override your model.</li>
+  <li><b>Slider at 100%</b> — market-only ranking. Mostly a sanity check.</li>
+</ul>
+<p>Composite scores are broken down by signal: K, HR, Over, Under, plus hand-adjusted variants. Badges flag the strongest individual signals per game.</p>`
+    },
+    {
+      icon: '🎯',
+      title: 'TB Targets Tab',
+      color: 'var(--pu)',
+      body: `<p>Dedicated total bases prop tab. Scores every batter on the slate using a 5-factor model:</p>
+<ul style="margin:8px 0 8px 18px;line-height:2">
+  <li><b>Batter SLG vs pitcher hand</b> (45%) — individual player splits when available.</li>
+  <li><b>Pitcher SLG-allowed vs batter hand</b> (35%) — flips advantage based on each batter.</li>
+  <li><b>Park HR / Run factors</b> + <b>weather</b> (wind direction, temperature).</li>
+  <li><b>Lineup position</b> — top of order = more PAs.</li>
+  <li><b>Away batter 9th-inning bonus</b> — extra plate appearance opportunity.</li>
+</ul>
+<p>The <b>Top 15</b> section surfaces best over targets. The <b>Under targets</b> section finds batters with weak model scores who still have prop lines listed — strong under leans.</p>
+<p style="margin-top:8px"><b style="color:var(--t3)">Individual splits ✓</b> in the corner means real player-level split data loaded. Without it, the app falls back to team-level splits and league-average estimates.</p>`
+    },
+    {
+      icon: '🔥',
+      title: 'Pitch Mash Tab',
+      color: 'var(--r)',
+      body: `<p>Identifies pitchers who lean heavily on one pitch type (above usage threshold), then ranks the opposing batters by how well they hit that exact pitch type from that handedness.</p>
+<p style="margin-top:8px">Composite score weighting per batter:</p>
+<ul style="margin:8px 0 8px 18px;line-height:2">
+  <li><b>wOBA vs pitch type</b> (30%)</li>
+  <li><b>SLG / xwOBA proxy</b> (25%)</li>
+  <li><b>Hard Hit %</b> (20%)</li>
+  <li><b>Barrel %</b> (15%)</li>
+  <li><b>K %</b> inverted (10%)</li>
+</ul>
+<p>Platoon advantages are flagged visually. When the MLB pitch arsenal endpoint returns nothing for a pitcher (common for openers, recent call-ups), the app falls back to a K-rate + GB% mix estimator.</p>`
     },
     {
       icon: '💰',
       title: 'DFS Mode',
       color: 'var(--pu)',
-      body: `<p>Switch to <b style="color:var(--pu)">💰 DFS</b> mode to activate the DFS tab. Everything here uses <b style="color:var(--t)">DraftKings Classic MLB scoring</b>: 1B=3pts, 2B=5pts, 3B=8pts, HR=10pts, RBI=3.5pts, R=3pts, BB=3pts for hitters; IP×2.25, K×2, ER×-2 for pitchers.</p>
+      body: `<p>Switch to <b style="color:var(--pu)">💰 DFS</b> mode to activate the DFS tab. Uses <b style="color:var(--t)">DraftKings Classic MLB scoring</b>: 1B=3, 2B=5, 3B=8, HR=10, RBI=3.5, R=3, BB=3 for hitters; IP×2.25, K×2, ER×-2 for pitchers.</p>
 <p style="margin-top:8px"><b style="color:var(--t)">To load DK salaries:</b></p>
 <ol style="margin:8px 0 8px 18px;line-height:2">
   <li>Go to <b>draftkings.com → Sports → MLB</b></li>
   <li>Open a Classic contest → <b>Enter Contest</b></li>
   <li>In the lineup builder, click <b>⬇ Export to CSV</b> (top-right of the player list)</li>
-  <li>Click <b>📂 Choose CSV File</b> (or the <b>Upload DK Salaries</b> button in the tab bar) and select the file</li>
+  <li>Click <b>📂 Choose CSV File</b> in the DFS tab</li>
 </ol>
-<p>Once loaded, salaries appear in the table and the DK Pts Proj column becomes your primary sorting tool. <b>Value (pts/$1k)</b> is the best column for finding underpriced plays.</p>`
+<p>Once loaded, salaries appear in the table. <b>Value (pts/$1k)</b> is the best column for finding underpriced plays.</p>`
     },
     {
       icon: '⚡',
       title: 'Lineup Optimizer',
       color: 'var(--pu)',
-      body: `<p>The optimizer appears at the top of the DFS tab. It fills a DK Classic lineup (2SP, C, 1B, 2B, 3B, SS, 3OF) within the $50,000 salary cap, maximizing projected DK points. <b>Salary data must be loaded first.</b></p>
-<p style="margin-top:8px">The three sliders let you tilt the optimizer's priorities:</p>
+      body: `<p>Top of the DFS tab. Fills a DK Classic lineup (2SP, C, 1B, 2B, 3B, SS, 3OF) under the $50,000 cap, maximizing projected DK points. <b>Salary data must be loaded first.</b></p>
+<p style="margin-top:8px">Three tilt sliders:</p>
 <ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b style="color:var(--pu)">SLG Matchup</b> — slide right to favor hitters with high SLG vs the opposing pitcher's hand. Good for TB-heavy slates or when you want to stack power hitters.</li>
-  <li><b style="color:var(--pu)">Weather</b> — slide right to boost hitters in wind-out or warm outdoor games, and to reward pitchers in domes or wind-in parks. Useful for windy days at Wrigley, Fenway, etc.</li>
-  <li><b style="color:var(--pu)">K Matchup (SP)</b> — slide right to favor pitchers facing high-strikeout lineups. Use this on days when you want your SP investment to correlate with a favorable K environment.</li>
+  <li><b style="color:var(--pu)">SLG Matchup</b> — favor hitters with high SLG vs the opposing pitcher's hand. Good for TB-heavy slates and power stacks.</li>
+  <li><b style="color:var(--pu)">Weather</b> — boost hitters in wind-out / warm outdoor games, reward pitchers in domes / wind-in parks.</li>
+  <li><b style="color:var(--pu)">K Matchup (SP)</b> — favor pitchers facing high-K lineups.</li>
 </ul>
-<p>After adjusting sliders, click <b>⚡ Generate Optimal Lineup</b> to see the result with total salary used and projected points.</p>`
+<p>Click <b>⚡ Generate Optimal Lineup</b> after adjusting.</p>`
     },
     {
       icon: '🔗',
       title: 'Stack View & Game Filters',
       color: 'var(--o)',
-      body: `<p>At the bottom of the DFS tab, the <b>Top Stacks</b> section scores team stacking opportunities. It considers the combined SLG of the top 5 hitters vs the opposing pitcher's hand, the pitcher's FIP, park HR factor, and weather. The stack score is your fastest way to identify which team's offense to build around.</p>
-<p style="margin-top:8px">The <b>Game Filter bar</b> (just above the main content) lets you click any game chip to include or exclude it from all views — table, heatmap, charts, and DFS — simultaneously. This is useful when you want to focus on a specific subset of games or exclude a postponement.</p>`
+      body: `<p>Bottom of the DFS tab — <b>Top Stacks</b> scores team stacking opportunities. Combines the top 5 hitters' SLG vs opposing pitcher hand, pitcher FIP, park HR factor, and weather.</p>
+<p style="margin-top:8px">The <b>Game Filter bar</b> (above the main content) lets you click any game chip to include or exclude it from <b>all</b> views simultaneously — Big Board, Table, Charts, Edges, TB Targets, Pitch Mash, DFS. Useful for focusing on a subset or excluding a postponement.</p>`
     },
     {
       icon: '🎮',
       title: 'Workflow Tips',
       color: 'var(--teal)',
-      body: `<p><b style="color:var(--t)">Recommended daily workflow:</b></p>
+      body: `<p><b style="color:var(--t)">Recommended daily workflow (Betting):</b></p>
 <ol style="margin:8px 0 8px 18px;line-height:2.2">
-  <li>Load today's slate. Wait for AI enrichment to finish (watch the status bar).</li>
-  <li>Start in <b>🔥 Heatmap → K Edge</b> to quickly identify the top 2–3 K prop targets for the day.</li>
-  <li>Switch to <b>💣 HR Edge</b> and <b>🟣 TB/SLG</b> to find power environments.</li>
-  <li>Click the game with the highest heat score to open full detail — check the Pitcher L/R Splits panel and the Batter Split Heatmap to confirm the edge is real.</li>
-  <li>Switch to <b>💰 DFS mode</b>, upload your DK salary CSV, and sort by <b>Value (Pts/$)</b> to find underpriced plays that align with your Betting mode findings.</li>
-  <li>Adjust the optimizer sliders to match your slate thesis, then generate a lineup.</li>
-  <li>Use the <b>Game Filter</b> to lock in specific games and re-run the optimizer for a targeted approach.</li>
+  <li>Load today's slate. Wait for the YRFI strip and tabs to populate (~15–30s).</li>
+  <li>Scan the <b>YRFI strip</b> for early YRFI/NRFI plays.</li>
+  <li>Open <b>Matchup Cards</b> for a slate-wide first read.</li>
+  <li>Switch to <b>🌍 Big Board → K Edge</b> for top K prop targets, then <b>💣 HR Edge</b> and <b>🟣 TB/SLG</b>.</li>
+  <li>Use <b>📊 Table</b> to drill into specific stats with sorting.</li>
+  <li>Cross-check with <b>📈 Pitcher Charts</b> for K props and <b>⭐ Edge Rankings</b> for composite confirmation.</li>
+  <li>Open <b>🎯 TB Targets</b> for individual batter TB plays.</li>
+  <li>Check <b>🔥 Pitch Mash</b> for one-pitch-heavy pitchers facing batters who crush that pitch.</li>
+  <li>(Optional) Click <b>✦ Slate Breakdown</b> for AI player notes.</li>
 </ol>
-<p><b style="color:var(--y)">Pro tip:</b> The Odds Weight slider in the controls bar adjusts how much live betting lines influence the composite score. Set it to 0% for a pure stats view, or 40–50% when you want market consensus to influence rankings.</p>`
+<p style="margin-top:8px"><b style="color:var(--t)">DFS workflow:</b> Switch to DFS mode → upload DK CSV → sort by Value (Pts/$) → adjust optimizer sliders to match your slate thesis → generate lineup.</p>
+<p style="margin-top:8px"><b style="color:var(--y)">Pro tip:</b> The <b>Edges Odds Wt</b> slider <b>only affects the Edge Rankings tab and the ⭐ Score column in Table</b>. Every other tab — YRFI strip, Big Board, Pitcher Charts, TB Targets, Pitch Mash, DFS — is pure stat-based with no market input.</p>`
     },
   ];
 
@@ -4658,13 +4735,15 @@ function scoreTBTargets() {
         const bHand = b.hand || 'R';
 
         const workerBatterSplit = S.tbSplits.batters[b.player_id] || {};
+        // num() guards against NaN — parseFloat on undefined/'' returns NaN, which ?? does NOT catch
+        const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
         const batterSLGvsSP = (spHand === 'R')
-          ? (workerBatterSplit.vsR ?? parseFloat(bSplit(b, 'R').slg) ?? b.slg ?? 0.380)
-          : (workerBatterSplit.vsL ?? parseFloat(bSplit(b, 'L').slg) ?? b.slg ?? 0.380);
+          ? (num(workerBatterSplit.vsR) ?? num(bSplit(b, 'R').slg) ?? num(b.slg) ?? 0.380)
+          : (num(workerBatterSplit.vsL) ?? num(bSplit(b, 'L').slg) ?? num(b.slg) ?? 0.380);
 
         const pitcherSLGvsBatter = (bHand === 'L')
-          ? (pSplits.vsL ?? oppSP?.slg_against ?? 0.400)
-          : (pSplits.vsR ?? oppSP?.slg_against ?? 0.400);
+          ? (num(pSplits.vsL) ?? num(oppSP?.slg_against) ?? 0.400)
+          : (num(pSplits.vsR) ?? num(oppSP?.slg_against) ?? 0.400);
 
         const parkHR    = (g.park?.hr || 100);
         const parkRun   = (g.park?.run || 100);
@@ -4690,7 +4769,7 @@ function scoreTBTargets() {
           venueName: g.venue || '', score,
           propLine: prop?.line ?? null,
           underPrice: prop?.underPrice ?? null,
-          hasWorkerData: !!(S.tbSplits.batters[b.player_id] || S.tbSplits.pitchers[oppSPId]),
+          hasWorkerData: !!(S.tbSplits.batters[b.player_id]),
         });
       }
     }
