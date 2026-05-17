@@ -691,6 +691,7 @@ canvas{max-width:100%}
       <button class="vt" data-v="dfs" id="vtDfs" style="display:none;color:var(--pu)">💰 DFS</button>
       <button class="vt" data-v="tb" id="vtTB">🎯 TB Targets</button>
       <button class="vt" data-v="pitchmash" id="vtPitchMash">🔥 Pitch Mash</button>
+      <button class="vt" data-v="boards" id="vtBoards">🎲 Bet Boards</button>
       <button class="btn" id="dfsUploadTabBtn" onclick="document.getElementById('dfsFileInput').click()" style="display:none;margin-left:auto;background:var(--pu);font-size:11px;padding:4px 13px">📂 Upload DK Salaries</button>
     </div>
     <div id="cardsView" class="cgrid"></div>
@@ -703,6 +704,7 @@ canvas{max-width:100%}
     <div id="dfsView" style="display:none"></div>
     <div id="tbView" style="display:none"></div>
     <div id="pitchmashView" style="display:none"></div>
+    <div id="boardsView" style="display:none"></div>
   </div>
   <div id="gameDetail" style="display:none">
     <button class="bkbtn" id="backBtn">← Back to Slate</button>
@@ -2693,6 +2695,7 @@ function renderView() {
   showEl('dfsView',     S.view==='dfs');
   showEl('tbView',      S.view==='tb');
   showEl('pitchmashView', S.view==='pitchmash');
+  showEl('boardsView',    S.view==='boards');
   renderYRFIStrip(); // re-renders when game filter changes
   if      (S.view==='cards')     renderCards();
   else if (S.view==='heatmap')   renderHeatmap();
@@ -2702,6 +2705,7 @@ function renderView() {
   else if (S.view==='dfs')       renderDFS();
   else if (S.view==='tb')        renderTB();
   else if (S.view==='pitchmash') renderPitchMash();
+  else if (S.view==='boards')    renderBetBoards();
 }
 
 // ─── CARDS ───
@@ -5246,6 +5250,354 @@ function bindPMControls() {
       renderPitchMash();
     });
   }
+}
+
+// ════════════════════════════════════════════════════════════════
+// ─── BET BOARDS ─────────────────────────────────────────────────
+// Two sub-views (K Board, TB Board) for at-a-glance prop scanning.
+// K Board: pitcher K% (hand-adjusted) + opp K% (hand-adjusted) + L3 workload bonus.
+// TB Board: wraps existing scoreTBTargets() output in row-style layout.
+// ════════════════════════════════════════════════════════════════
+const BB = {
+  sub: 'k',          // 'k' or 'tb'
+  l3Loaded: false,
+  l3Loading: false,
+  l3Cache: {},       // pitcherId → { games, avg_k, avg_ip } | null
+  l3CacheDate: null, // ISO date string — invalidates if slate date changes
+};
+
+// Red → yellow → green gradient (inverse of YRFI: high score = green = best K matchup).
+function kBoardGradientColor(pct) {
+  const t = Math.max(0, Math.min(100, pct)) / 100;
+  let r, g, b;
+  if (t < 0.5) {
+    // red (#ff453a) → yellow (#ffd60a)
+    const s = t / 0.5;
+    r = Math.round(255 + (255 - 255) * s);
+    g = Math.round(69  + (214 - 69)  * s);
+    b = Math.round(58  + (10  - 58)  * s);
+  } else {
+    // yellow (#ffd60a) → green (#30d158)
+    const s = (t - 0.5) / 0.5;
+    r = Math.round(255 + (48  - 255) * s);
+    g = Math.round(214 + (209 - 214) * s);
+    b = Math.round(10  + (88  - 10)  * s);
+  }
+  return `rgb(${r},${g},${b})`;
+}
+
+// Lineup composition: returns {lhb, rhb, sw, dominant: 'L'|'R'} for the opposing team's lineup.
+// Used to pick which pitcher vs-hand split to weight more.
+function lineupHandMix(lineup) {
+  let lhb = 0, rhb = 0, sw = 0;
+  for (const b of (lineup || [])) {
+    if (b.hand === 'L') lhb++;
+    else if (b.hand === 'S') sw++;
+    else rhb++;
+  }
+  // Switch hitters bat opposite the pitcher → they'll be LHB vs RHP, RHB vs LHP.
+  // For mix, we count them toward the pitcher's "vs L" exposure to be safe.
+  return { lhb, rhb, sw, dominant: lhb + sw >= rhb ? 'L' : 'R' };
+}
+
+// K Board score for a single pitcher matchup.
+// Formula B + workload: pitcher_K%_vs_hand × 1.4 + opp_K%_vs_hand × 0.7 + workload_bonus
+function sKBoard(pitcher, oppTeam, oppLineup, l3) {
+  const pHand = pitcher.hand || 'R';
+  const mix = lineupHandMix(oppLineup);
+
+  // Weight the pitcher's K% by lineup composition (e.g. 70% LHB → 70% weight on vsL)
+  const totalBatters = mix.lhb + mix.rhb + mix.sw || 9;
+  const lWeight = (mix.lhb + mix.sw) / totalBatters;
+  const rWeight = mix.rhb / totalBatters;
+
+  const pK_vsL = pitcher.vsL?.k_pct ?? pitcher.k_pct ?? 22;
+  const pK_vsR = pitcher.vsR?.k_pct ?? pitcher.k_pct ?? 22;
+  const pK_weighted = (pK_vsL * lWeight) + (pK_vsR * rWeight);
+
+  // Opp team's K% specifically vs this pitcher's hand
+  const oppKey = pHand === 'L' ? 'vsLHP' : 'vsRHP';
+  const oK = oppTeam[oppKey]?.k_pct ?? oppTeam.k_pct ?? 22;
+
+  // Workload bonus — more IP/start = more K opportunities for over hits
+  const ipPerStart = l3?.avg_ip ?? null;
+  const workloadBonus = ipPerStart != null
+    ? Math.max(0, (ipPerStart - 5.0)) * 1.5
+    : 0;  // no penalty when L3 missing; score is provisional
+
+  return {
+    raw: (pK_weighted * 1.4) + (oK * 0.7) + workloadBonus,
+    pK_weighted,
+    oK,
+    workloadBonus,
+    mix,
+    hasL3: l3 != null,
+  };
+}
+
+// Normalize raw scores to 0-100 across the slate so the gradient bar always uses full range.
+function normalizeKScores(rows) {
+  if (!rows.length) return rows;
+  const raws = rows.map(r => r.score.raw);
+  const lo = Math.min(...raws), hi = Math.max(...raws);
+  const span = hi - lo || 1;
+  for (const r of rows) {
+    r.score.pct = Math.round(((r.score.raw - lo) / span) * 100);
+  }
+  return rows;
+}
+
+// Look up best K prop line for a pitcher across books (highest line wins for hunting overs).
+function lookupKProp(pitcherName, gameId, oddsEventId) {
+  const props = S.playerProps?.[gameId] || S.playerProps?.[oddsEventId];
+  if (!props?.kProps?.length) return null;
+  const target = normName(pitcherName);
+  const matches = props.kProps.filter(p => normName(p.name) === target);
+  if (!matches.length) return null;
+  // Pick the best Over line for the pitcher
+  const overs = matches.filter(m => m.type === 'Over');
+  const unders = matches.filter(m => m.type === 'Under');
+  const bestOver = overs.length ? overs.reduce((a,b) => (a.price > b.price ? a : b)) : null;
+  const bestUnder = unders.length ? unders.reduce((a,b) => (a.price > b.price ? a : b)) : null;
+  return {
+    line: bestOver?.line ?? bestUnder?.line ?? null,
+    overPrice: bestOver?.price ?? null,
+    underPrice: bestUnder?.price ?? null,
+    book: bestOver?.book ?? bestUnder?.book ?? null,
+  };
+}
+
+// Lazy-fetch L3 game logs for all starters in today's slate.
+async function fetchL3Logs() {
+  const todayKey = S.date || new Date().toISOString().slice(0,10);
+  if (BB.l3CacheDate !== todayKey) {
+    BB.l3Cache = {};
+    BB.l3Loaded = false;
+  }
+  BB.l3CacheDate = todayKey;
+  if (BB.l3Loaded || BB.l3Loading) return;
+
+  const ids = [];
+  for (const g of S.games) {
+    if (g.away_sp_id) ids.push(g.away_sp_id);
+    if (g.home_sp_id) ids.push(g.home_sp_id);
+  }
+  if (!ids.length) { BB.l3Loaded = true; return; }
+
+  BB.l3Loading = true;
+  try {
+    const r = await fetch(CF_WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'pitcher-gamelog',
+        playerIds: [...new Set(ids)],
+        season: new Date().getFullYear(),
+        lastN: 5,
+      }),
+    });
+    if (r.ok) {
+      const data = await r.json();
+      BB.l3Cache = data.logs || {};
+    }
+  } catch (e) {
+    console.warn('L3 fetch failed:', e.message);
+  }
+  BB.l3Loading = false;
+  BB.l3Loaded = true;
+  if (S.view === 'boards' && BB.sub === 'k') renderBetBoards();
+}
+
+function buildKBoardRows() {
+  const rows = [];
+  for (const g of filteredGames()) {
+    for (const [sp, spId, oppTeam, oppLineup, myTeam, oppAbbr, isHome] of [
+      [g.asp, g.away_sp_id, g.ht, g.home_lu, g.away, g.home, false],
+      [g.hsp, g.home_sp_id, g.at, g.away_lu, g.home, g.away, true],
+    ]) {
+      if (!sp?.name || sp.name === 'TBD') continue;
+      const l3 = spId ? BB.l3Cache[spId] : null;
+      const score = sKBoard(sp, oppTeam, oppLineup, l3);
+      const prop = lookupKProp(sp.name, g.game_id, g.oddsEventId);
+      rows.push({
+        sp, spId, oppTeam, oppLineup, myTeam, oppAbbr, isHome,
+        gameId: g.game_id, gameTime: g.game_time, venue: g.venue,
+        wx: g.wx, park: g.park,
+        l3, score, prop,
+      });
+    }
+  }
+  rows.sort((a, b) => b.score.raw - a.score.raw);
+  return normalizeKScores(rows);
+}
+
+function mkKRow(r, rank) {
+  const sp = r.sp;
+  const hand = sp.hand || '?';
+  const handColor = hand === 'L' ? 'var(--r)' : hand === 'R' ? 'var(--bl)' : 'var(--t3)';
+  const barColor = kBoardGradientColor(r.score.pct);
+
+  // L3 display
+  let l3Display;
+  if (!BB.l3Loaded) {
+    l3Display = `<span style="color:var(--t3);font-style:italic">Loading L3…</span>`;
+  } else if (!r.l3 || !r.l3.games?.length) {
+    l3Display = `<span style="color:var(--t3)">No L3 data</span>`;
+  } else {
+    const ks = r.l3.games.slice(0, 3).map(x => x.k).join(', ');
+    l3Display = `<span style="color:var(--t)">L3: <b>${ks}</b></span> <span style="color:var(--t3)">(avg ${r.l3.avg_k}, ${r.l3.avg_ip} IP/start)</span>`;
+  }
+
+  // Prop line display
+  let propDisplay;
+  if (r.prop && r.prop.line != null) {
+    const overTxt = r.prop.overPrice != null
+      ? `o${r.prop.line} ${r.prop.overPrice > 0 ? '+' : ''}${r.prop.overPrice}`
+      : `o${r.prop.line}`;
+    propDisplay = `<span style="color:var(--t);font-weight:500">${overTxt}</span>`;
+  } else {
+    propDisplay = `<span style="color:var(--t3);font-style:italic">No prop</span>`;
+  }
+
+  // Weather chip
+  const wx = r.wx || {};
+  const wxTxt = wx.dome ? 'Dome'
+    : `${wx.temp_f || '?'}° ${wx.weff === 'out' ? '↑' : wx.weff === 'in' ? '↓' : ''}${wx.wsp ? wx.wsp + 'mph' : ''}`;
+
+  // Park K factor — sub-100 = pitcher-friendly for Ks (suppresses runs, often more Ks too via foul ground / large outfield)
+  const parkSO = r.park?.so || 100;
+  const parkColor = parkSO >= 105 ? 'var(--g)' : parkSO <= 95 ? 'var(--r)' : 'var(--t2)';
+
+  // Lineup mix label
+  const mix = r.score.mix;
+  const mixLabel = `${mix.lhb}L/${mix.rhb}R${mix.sw ? '/' + mix.sw + 'S' : ''}`;
+
+  return `<div class="kbrow" data-gid="${r.gameId}" style="background:var(--c2);border:0.5px solid var(--b1);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:grid;grid-template-columns:38px 2.2fr 3fr 110px;gap:14px;align-items:center;cursor:pointer;transition:border-color .15s">
+    <div style="font-size:18px;font-weight:600;color:var(--t3);text-align:center">${rank}</div>
+    <div>
+      <div style="font-size:15px;font-weight:500;color:var(--t)">${sp.name} <span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.06);color:${handColor};margin-left:4px">${hand}HP</span></div>
+      <div style="font-size:12px;color:var(--t2);margin-top:3px">${r.myTeam} ${r.isHome ? 'vs' : '@'} ${r.oppAbbr} · <span style="color:var(--t3)">${r.gameTime || ''}</span></div>
+      <div style="font-size:11px;color:var(--t3);margin-top:3px">${wxTxt} · Park <span style="color:${parkColor}">${parkSO}K</span> · Opp lineup ${mixLabel}</div>
+    </div>
+    <div style="font-size:12px;color:var(--t2);line-height:1.7">
+      <div>K% weighted: <b style="color:var(--t)">${r.score.pK_weighted.toFixed(1)}%</b> · Opp K% vs ${hand}HP: <b style="color:var(--t)">${r.score.oK.toFixed(1)}%</b></div>
+      <div>${l3Display}</div>
+      <div>Prop: ${propDisplay}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      <div style="font-size:22px;font-weight:600;color:${barColor}">${r.score.pct}</div>
+      <div style="width:90px;height:5px;background:var(--b1);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${r.score.pct}%;background:${barColor};border-radius:3px;transition:width .25s"></div>
+      </div>
+      ${r.score.hasL3 ? '' : '<div style="font-size:9px;color:var(--t3)">provisional</div>'}
+    </div>
+  </div>`;
+}
+
+function renderBetBoards() {
+  const el = document.getElementById('boardsView');
+  if (!el) return;
+
+  if (!S.games.length) {
+    el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--t2);font-size:14px">Load a slate to see Bet Boards.</div>`;
+    return;
+  }
+
+  // Sub-tab pills
+  const pillsHTML = `<div style="display:flex;gap:6px;margin-bottom:14px">
+    <button class="bb-pill ${BB.sub==='k'?'on':''}" data-sub="k" style="background:${BB.sub==='k'?'var(--pu)':'var(--c2)'};color:${BB.sub==='k'?'#fff':'var(--t2)'};border:0.5px solid ${BB.sub==='k'?'var(--pu)':'var(--b1)'};border-radius:6px;padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer;transition:all .14s">⚡ K Board</button>
+    <button class="bb-pill ${BB.sub==='tb'?'on':''}" data-sub="tb" style="background:${BB.sub==='tb'?'var(--pu)':'var(--c2)'};color:${BB.sub==='tb'?'#fff':'var(--t2)'};border:0.5px solid ${BB.sub==='tb'?'var(--pu)':'var(--b1)'};border-radius:6px;padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer;transition:all .14s">🎯 TB Board</button>
+  </div>`;
+
+  let bodyHTML = '';
+  if (BB.sub === 'k') {
+    // Kick off L3 fetch if not loaded yet
+    if (!BB.l3Loaded && !BB.l3Loading) fetchL3Logs();
+
+    const rows = buildKBoardRows();
+    if (!rows.length) {
+      bodyHTML = `<div style="padding:40px;text-align:center;color:var(--t2);font-size:14px">No starting pitchers found in the current filter.</div>`;
+    } else {
+      const note = BB.l3Loaded
+        ? `<div style="color:var(--t3);font-size:11px;margin-bottom:10px">${rows.filter(r=>r.score.hasL3).length}/${rows.length} pitchers with L3 data · scores include workload bonus</div>`
+        : `<div style="color:var(--t3);font-size:11px;margin-bottom:10px">Loading L3 game logs… scores update when complete</div>`;
+      bodyHTML = note + rows.map((r, i) => mkKRow(r, i + 1)).join('');
+    }
+  } else if (BB.sub === 'tb') {
+    // Reuse existing TB scoring — already battle-tested with all your special-sauce weights
+    if (S.tbSplits.loading) {
+      bodyHTML = `<div style="padding:40px;text-align:center;color:var(--t2);font-size:14px">Loading split data…</div>`;
+    } else {
+      const { top } = scoreTBTargets();
+      if (!top.length) {
+        bodyHTML = `<div style="padding:40px;text-align:center;color:var(--t2);font-size:14px">No TB targets available yet.</div>`;
+      } else {
+        const note = `<div style="color:var(--t3);font-size:11px;margin-bottom:10px">Top ${top.length} TB targets · scoring inherits TB Targets tab model (away-9th bonus, park, weather, splits)</div>`;
+        bodyHTML = note + top.map((t, i) => mkTBBoardRow(t, i + 1)).join('');
+      }
+    }
+  }
+
+  el.innerHTML = pillsHTML + bodyHTML;
+
+  // Wire sub-tab pills
+  el.querySelectorAll('.bb-pill').forEach(b => {
+    b.addEventListener('click', () => {
+      BB.sub = b.dataset.sub;
+      renderBetBoards();
+    });
+  });
+
+  // Wire row click → game detail (K rows only — TB rows are informational)
+  el.querySelectorAll('.kbrow').forEach(row => {
+    row.addEventListener('mouseenter', () => row.style.borderColor = 'var(--pu)');
+    row.addEventListener('mouseleave', () => row.style.borderColor = 'var(--b1)');
+    row.addEventListener('click', () => {
+      const gid = row.dataset.gid;
+      if (gid && typeof showDetail === 'function') showDetail(gid);
+    });
+  });
+}
+
+// TB Board row — same visual shape as K row but pulls from existing TB target scoring.
+function mkTBBoardRow(t, rank) {
+  const barColor = kBoardGradientColor(t.pct);
+  const handColor = t.spHand === 'L' ? 'var(--r)' : 'var(--bl)';
+
+  const propDisplay = t.propLine != null
+    ? `<span style="color:var(--t);font-weight:500">o${t.propLine.toFixed(1)}${t.underPrice != null ? ` (u ${t.underPrice > 0 ? '+' : ''}${t.underPrice})` : ''}</span>`
+    : `<span style="color:var(--t3);font-style:italic">No prop</span>`;
+
+  const awayBadge = t.isAway
+    ? `<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(147,51,234,.15);color:var(--pu);margin-left:6px">AWAY·9th</span>`
+    : '';
+
+  const wxTxt = t.dome ? 'Dome'
+    : (t.windSpd >= 8 ? `${t.windSpd}mph ${t.windDir==='out'?'↑':t.windDir==='in'?'↓':'→'}` : `${t.temp || '?'}°`);
+
+  const ordLabel = t.ord ? `${t.ord}${['st','nd','rd'][t.ord-1]||'th'}` : '—';
+
+  const parkColor = (t.parkHR || 100) >= 108 ? 'var(--pu)' : (t.parkHR || 100) >= 103 ? 'var(--g)' : 'var(--t2)';
+
+  return `<div class="tbbrow" style="background:var(--c2);border:0.5px solid var(--b1);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:grid;grid-template-columns:38px 2.2fr 3fr 110px;gap:14px;align-items:center;transition:border-color .15s">
+    <div style="font-size:18px;font-weight:600;color:var(--t3);text-align:center">${rank}</div>
+    <div>
+      <div style="font-size:15px;font-weight:500;color:var(--t)">${t.name}${awayBadge}</div>
+      <div style="font-size:12px;color:var(--t2);margin-top:3px">${t.team} · ${ordLabel} · vs <span style="color:${handColor}">${t.spHand}HP</span> ${t.oppSPName}</div>
+      <div style="font-size:11px;color:var(--t3);margin-top:3px">${wxTxt} · Park <span style="color:${parkColor}">${t.parkHR || 100}HR</span></div>
+    </div>
+    <div style="font-size:12px;color:var(--t2);line-height:1.7">
+      <div>Batter SLG vs ${t.spHand}HP: <b style="color:var(--t)">${(t.batterSLG||0).toFixed(3)}</b></div>
+      <div>SP SLG-allowed vs ${t.hand}HB: <b style="color:var(--t)">${(t.pitcherSLG||0).toFixed(3)}</b></div>
+      <div>Prop: ${propDisplay}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      <div style="font-size:22px;font-weight:600;color:${barColor}">${t.pct}</div>
+      <div style="width:90px;height:5px;background:var(--b1);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${t.pct}%;background:${barColor};border-radius:3px"></div>
+      </div>
+    </div>
+  </div>`;
 }
 
 </script>
