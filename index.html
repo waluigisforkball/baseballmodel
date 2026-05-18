@@ -4774,6 +4774,7 @@ function scoreTBTargets() {
           propLine: prop?.line ?? null,
           underPrice: prop?.underPrice ?? null,
           hasWorkerData: !!(S.tbSplits.batters[b.player_id]),
+          estimated: !!b._estimated,
         });
       }
     }
@@ -4855,7 +4856,7 @@ function renderTB() {
         </div>`;
     return `<div style="background:var(--c2);border:0.5px solid var(--b1);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:grid;grid-template-columns:2fr 3fr 80px;gap:12px;align-items:center">
       <div>
-        <div style="font-size:15px;font-weight:500;color:var(--t)">${t.name}</div>
+        <div style="font-size:15px;font-weight:500;color:var(--t)">${t.name}${t.estimated ? ' <span title="Lineup not posted yet — projected hitter, hand defaults to R">⚠️</span>' : ''}</div>
         <div style="font-size:12px;color:var(--t2);margin-top:2px">${t.team} · vs ${t.spHand}HP ${t.oppSPName}</div>
         ${awayBadge}
       </div>
@@ -5172,6 +5173,7 @@ async function renderPitchMash() {
           <div class="pm-batter-cell">
             <div class="pm-batter-name">
               ${batter.name}
+              ${batter._estimated ? '<span title="Lineup not posted yet — projected hitter, hand defaults to R" style="margin-left:4px">⚠️</span>' : ''}
               ${platAdv ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(147,51,234,.15);color:var(--pu);margin-left:4px">PLAT</span>' : ''}
             </div>
             <div class="pm-batter-meta">
@@ -5286,18 +5288,28 @@ function kBoardGradientColor(pct) {
   return `rgb(${r},${g},${b})`;
 }
 
-// Lineup composition: returns {lhb, rhb, sw, dominant: 'L'|'R'} for the opposing team's lineup.
-// Used to pick which pitcher vs-hand split to weight more.
+// Lineup composition: returns {lhb, rhb, sw, dominant: 'L'|'R', estimated: bool} for opposing lineup.
+// When lineup hasn't posted yet (all batters _estimated), uses league-average composition
+// (~40% LHB+S, ~60% RHB) instead of trusting the all-R roster fallback. The `estimated` flag
+// gets surfaced in the UI so the user knows the score will shift when lineups drop.
 function lineupHandMix(lineup) {
+  const lu = lineup || [];
+  // "Estimated" = every batter came from the roster fallback (hand:'R' hardcoded).
+  // If even one batter has _estimated:false, real lineup data is partially available.
+  const allEstimated = lu.length > 0 && lu.every(b => b._estimated);
+
+  if (allEstimated || lu.length === 0) {
+    // League-average proxy: 4 LHB/S, 5 RHB. Slightly RHB-leaning because that matches reality.
+    return { lhb: 3, rhb: 5, sw: 1, dominant: 'R', estimated: true };
+  }
+
   let lhb = 0, rhb = 0, sw = 0;
-  for (const b of (lineup || [])) {
+  for (const b of lu) {
     if (b.hand === 'L') lhb++;
     else if (b.hand === 'S') sw++;
     else rhb++;
   }
-  // Switch hitters bat opposite the pitcher → they'll be LHB vs RHP, RHB vs LHP.
-  // For mix, we count them toward the pitcher's "vs L" exposure to be safe.
-  return { lhb, rhb, sw, dominant: lhb + sw >= rhb ? 'L' : 'R' };
+  return { lhb, rhb, sw, dominant: lhb + sw >= rhb ? 'L' : 'R', estimated: false };
 }
 
 // K Board score for a single pitcher matchup.
@@ -5470,7 +5482,9 @@ function mkKRow(r, rank) {
 
   // Lineup mix label
   const mix = r.score.mix;
-  const mixLabel = `${mix.lhb}L/${mix.rhb}R${mix.sw ? '/' + mix.sw + 'S' : ''}`;
+  const mixLabel = mix.estimated
+    ? `<span title="Lineup not posted yet — using league-average mix">⚠️ est. lineup</span>`
+    : `${mix.lhb}L/${mix.rhb}R${mix.sw ? '/' + mix.sw + 'S' : ''}`;
 
   return `<div class="kbrow" data-gid="${r.gameId}" style="background:var(--c2);border:0.5px solid var(--b1);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:grid;grid-template-columns:38px 2.2fr 3fr 110px;gap:14px;align-items:center;cursor:pointer;transition:border-color .15s">
     <div style="font-size:18px;font-weight:600;color:var(--t3);text-align:center">${rank}</div>
@@ -5518,10 +5532,14 @@ function renderBetBoards() {
     if (!rows.length) {
       bodyHTML = `<div style="padding:40px;text-align:center;color:var(--t2);font-size:14px">No starting pitchers found in the current filter.</div>`;
     } else {
+      const estCount = rows.filter(r => r.score.mix.estimated).length;
+      const estBanner = estCount > 0
+        ? `<div style="background:rgba(255,159,10,.08);border:0.5px solid rgba(255,159,10,.25);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--t2)">⚠️ <b style="color:#ff9f0a">${estCount}/${rows.length}</b> lineups not yet posted — using league-average L/R mix. Re-check closer to first pitch as rankings will shift when real lineups drop.</div>`
+        : '';
       const note = BB.l3Loaded
         ? `<div style="color:var(--t3);font-size:11px;margin-bottom:10px">${rows.filter(r=>r.score.hasL3).length}/${rows.length} pitchers with L3 data · scores include workload bonus</div>`
         : `<div style="color:var(--t3);font-size:11px;margin-bottom:10px">Loading L3 game logs… scores update when complete</div>`;
-      bodyHTML = note + rows.map((r, i) => mkKRow(r, i + 1)).join('');
+      bodyHTML = estBanner + note + rows.map((r, i) => mkKRow(r, i + 1)).join('');
     }
   } else if (BB.sub === 'tb') {
     // Reuse existing TB scoring — already battle-tested with all your special-sauce weights
@@ -5572,6 +5590,10 @@ function mkTBBoardRow(t, rank) {
     ? `<span style="display:inline-block;font-size:9px;padding:1px 5px;border-radius:3px;background:rgba(147,51,234,.15);color:var(--pu);margin-left:6px">AWAY·9th</span>`
     : '';
 
+  const estIcon = t.estimated
+    ? `<span title="Lineup not posted yet — projected hitter, hand defaults to R" style="margin-left:5px">⚠️</span>`
+    : '';
+
   const wxTxt = t.dome ? 'Dome'
     : (t.windSpd >= 8 ? `${t.windSpd}mph ${t.windDir==='out'?'↑':t.windDir==='in'?'↓':'→'}` : `${t.temp || '?'}°`);
 
@@ -5582,7 +5604,7 @@ function mkTBBoardRow(t, rank) {
   return `<div class="tbbrow" style="background:var(--c2);border:0.5px solid var(--b1);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:grid;grid-template-columns:38px 2.2fr 3fr 110px;gap:14px;align-items:center;transition:border-color .15s">
     <div style="font-size:18px;font-weight:600;color:var(--t3);text-align:center">${rank}</div>
     <div>
-      <div style="font-size:15px;font-weight:500;color:var(--t)">${t.name}${awayBadge}</div>
+      <div style="font-size:15px;font-weight:500;color:var(--t)">${t.name}${estIcon}${awayBadge}</div>
       <div style="font-size:12px;color:var(--t2);margin-top:3px">${t.team} · ${ordLabel} · vs <span style="color:${handColor}">${t.spHand}HP</span> ${t.oppSPName}</div>
       <div style="font-size:11px;color:var(--t3);margin-top:3px">${wxTxt} · Park <span style="color:${parkColor}">${t.parkHR || 100}HR</span></div>
     </div>
