@@ -1222,7 +1222,9 @@ async function enrichPitchers(games) {
         const lu = [];
         batters.forEach((pid, i) => {
           const p = players['ID'+pid]; if (!p) return;
-          lu.push({ name:p.person?.fullName||'', player_id:pid, hand:p.batSide?.code||'R', ord:i+1,
+          const handCode = p.batSide?.code;
+          lu.push({ name:p.person?.fullName||'', player_id:pid, hand:handCode||'R', ord:i+1,
+            _handMissing: !handCode,  // flag for downstream — defaulted to R, don't trust composition
             k_pct:null,bb_pct:null,iso:null,slg:null,ops:null,woba:null,wrc_plus:null,hh_pct:null,
             ev:null,cont:null,barrel:null,avg:null, vsL:{}, vsR:{}, dkSalary:null, dkPos:null });
         });
@@ -5289,22 +5291,32 @@ function kBoardGradientColor(pct) {
 }
 
 // Lineup composition: returns {lhb, rhb, sw, dominant: 'L'|'R', estimated: bool} for opposing lineup.
-// When lineup hasn't posted yet (all batters _estimated), uses league-average composition
-// (~40% LHB+S, ~60% RHB) instead of trusting the all-R roster fallback. The `estimated` flag
-// gets surfaced in the UI so the user knows the score will shift when lineups drop.
+// Three "untrustworthy" cases all collapse to estimated=true with a league-average mix:
+//   1. Empty lineup (none fetched)
+//   2. All batters from roster fallback (_estimated:true, hand hardcoded 'R')
+//   3. Live boxscore returned batters but batSide.code was missing for most (_handMissing)
+//
+// Slices to first 9 because MLB boxscore.batters can include subs/PH once games begin,
+// and roster fallbacks occasionally over-fill. A starting lineup is 9.
 function lineupHandMix(lineup) {
-  const lu = lineup || [];
-  // "Estimated" = every batter came from the roster fallback (hand:'R' hardcoded).
-  // If even one batter has _estimated:false, real lineup data is partially available.
-  const allEstimated = lu.length > 0 && lu.every(b => b._estimated);
+  const lu = (lineup || []).slice(0, 9);
 
-  if (allEstimated || lu.length === 0) {
-    // League-average proxy: 4 LHB/S, 5 RHB. Slightly RHB-leaning because that matches reality.
+  if (lu.length === 0) {
+    return { lhb: 3, rhb: 5, sw: 1, dominant: 'R', estimated: true };
+  }
+
+  const allRosterEst = lu.every(b => b._estimated);
+  const handMissingCount = lu.filter(b => b._handMissing).length;
+  const majorityMissing = handMissingCount > lu.length / 2;
+
+  if (allRosterEst || majorityMissing) {
     return { lhb: 3, rhb: 5, sw: 1, dominant: 'R', estimated: true };
   }
 
   let lhb = 0, rhb = 0, sw = 0;
   for (const b of lu) {
+    // Skip individual batters with missing hand data so they don't pollute real lineup mix
+    if (b._handMissing) continue;
     if (b.hand === 'L') lhb++;
     else if (b.hand === 'S') sw++;
     else rhb++;
