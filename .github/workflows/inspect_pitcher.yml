@@ -1,0 +1,19 @@
+name: Inspect Pitcher (throwaway)
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "Start date YYYY-MM-DD"
+        required: true
+      end:
+        description: "End date YYYY-MM-DD"
+        required: true
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python inspect_pitcher.py --start "${{ inputs.start }}" --end "${{ inputs.end }}"
