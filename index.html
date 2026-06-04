@@ -1218,13 +1218,20 @@ async function enrichPitchers(games) {
       const d = await proxyFetch(`${MLB_BASE}/game/${g.game_id}/boxscore`);
       if (!d?.teams) return;
       for (const side of ['away','home']) {
-        const tm = d.teams[side], batters = tm?.batters||[], players = tm?.players||{};
+        const tm = d.teams[side];
+        const players = tm?.players || {};
+        // battingOrder = announced starting lineup (available pre-game once posted).
+        // batters = players who have come to the plate (empty pre-game, grows in-game).
+        // Prefer battingOrder; fall back to batters once the game starts and PHs/subs enter.
+        const order = (tm?.battingOrder?.length ? tm.battingOrder : tm?.batters) || [];
         const lu = [];
-        batters.forEach((pid, i) => {
+        order.forEach((pid, i) => {
           const p = players['ID'+pid]; if (!p) return;
-          const handCode = p.batSide?.code;
-          lu.push({ name:p.person?.fullName||'', player_id:pid, hand:handCode||'R', ord:i+1,
-            _handMissing: !handCode,  // flag for downstream — defaulted to R, don't trust composition
+          // batSide isn't reliably populated in boxscore's nested person object —
+          // we'll batch-fetch it from /people below. Mark as missing for now; hand
+          // gets backfilled before this function returns.
+          lu.push({ name:p.person?.fullName||'', player_id:pid, hand:'R', ord:i+1,
+            _handMissing: true,
             k_pct:null,bb_pct:null,iso:null,slg:null,ops:null,woba:null,wrc_plus:null,hh_pct:null,
             ev:null,cont:null,barrel:null,avg:null, vsL:{}, vsR:{}, dkSalary:null, dkPos:null });
         });
@@ -1232,6 +1239,39 @@ async function enrichPitchers(games) {
       }
     } catch {}
   }));
+
+  // Batch-fetch real batSide for every batter we just slotted into a lineup.
+  // /people supports comma-separated personIds in a single call — one round-trip
+  // for the whole slate rather than 18×15 individual calls.
+  const allBatterIds = [...new Set(
+    games.flatMap(g => [...(g.away_lu||[]), ...(g.home_lu||[])].map(b => b.player_id))
+  )].filter(Boolean);
+
+  if (allBatterIds.length) {
+    try {
+      // MLB caps URL length; chunk to ~80 IDs per call to be safe
+      const handMapB = {};
+      const chunks = [];
+      for (let i = 0; i < allBatterIds.length; i += 80) chunks.push(allBatterIds.slice(i, i + 80));
+      await Promise.allSettled(chunks.map(async chunk => {
+        const d = await proxyFetch(`${MLB_BASE}/people?personIds=${chunk.join(',')}`);
+        for (const p of (d?.people || [])) {
+          if (p?.id && p?.batSide?.code) handMapB[p.id] = p.batSide.code;
+        }
+      }));
+      // Backfill hand on every batter we successfully resolved
+      for (const g of games) {
+        for (const lu of [g.away_lu || [], g.home_lu || []]) {
+          for (const b of lu) {
+            if (handMapB[b.player_id]) {
+              b.hand = handMapB[b.player_id];
+              b._handMissing = false;
+            }
+          }
+        }
+      }
+    } catch (e) { console.warn('Batter handedness batch fetch failed:', e.message); }
+  }
 
   // For any games where lineups weren't posted yet, fetch roster estimates
   await Promise.allSettled(games.flatMap(g => {
