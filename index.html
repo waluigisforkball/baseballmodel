@@ -1332,6 +1332,7 @@ async function fetchRosterEstimate(g, side) {
           k_pct:  st.strikeOuts && st.atBats ? parseFloat(st.strikeOuts)/parseFloat(st.atBats)*100 : null,
           bb_pct: st.baseOnBalls && st.plateAppearances ? parseFloat(st.baseOnBalls)/parseFloat(st.plateAppearances)*100 : null,
           games:  parseInt(st.gamesPlayed) || 0,
+          pa:     parseInt(st.plateAppearances) || 0, // for sample-size filtering in TB Targets
           vsL:{}, vsR:{}, dkSalary:null, dkPos:null,
           _estimated: true,
         };
@@ -1480,6 +1481,7 @@ async function fetchPStat(sp, pid, season) {
     const so = parseInt(st.strikeOuts)||0, bb = parseInt(st.baseOnBalls)||0;
     sp.era  = parseFloat(st.era)||null; sp.whip = parseFloat(st.whip)||null;
     sp.hr9  = parseFloat(st.homeRunsPer9)||null;
+    sp.ip   = R(parseFloat(st.inningsPitched)||0, 1); // stored for sample-size filtering
     sp.k9   = ip>0 ? R(so/ip*9,2) : null;
     sp.bb9  = ip>0 ? R(bb/ip*9,2) : null;
     sp.k_pct= bf>0 ? R(so/bf*100,1) : null;
@@ -4776,8 +4778,21 @@ function scoreTBTargets() {
       const spHand = oppSP?.hand || 'R';
       const pSplits = S.tbSplits.pitchers[oppSPId] || {};
 
+      // Pitcher minimum IP filter: 20+ IP this season.
+      // Only applies when sp.ip is populated (post fetchPStat). Openers, spot starters,
+      // and early-season SP with tiny samples are excluded — their SLG-allowed numbers
+      // are unreliable and skew the matchup score.
+      if (oppSP?.ip != null && oppSP.ip < 20) continue;
+
       for (const b of lu) {
         if (!b.name) continue;
+
+        // Batter minimum PA filter: 50+ PA this season.
+        // b.pa is set for roster-estimate batters (from fetchRosterEstimate) but is null
+        // for confirmed-lineup batters (confirmed starters are presumed established).
+        // This specifically targets the bench/fringe players that sneak in via roster estimates.
+        if (b.pa != null && b.pa < 50) continue;
+
         const bHand = b.hand || 'R';
 
         const workerBatterSplit = S.tbSplits.batters[b.player_id] || {};
@@ -4869,7 +4884,7 @@ function renderTB() {
   }
 
   const dataNote = S.tbSplits.loaded
-    ? `<span style="color:var(--t3);font-size:11px">Individual splits ${top.some(t=>t.hasWorkerData) ? '✓' : '— early season, using team fallback'}</span>`
+    ? `<span style="color:var(--t3);font-size:11px">Individual splits ${top.some(t=>t.hasWorkerData) ? '✓' : '— early season, using team fallback'} · Min 50 PA · Min 20 SP IP</span>`
     : '';
 
   function mkCard(t, isLow) {
@@ -5602,7 +5617,7 @@ function renderBetBoards() {
       if (!top.length) {
         bodyHTML = `<div style="padding:40px;text-align:center;color:var(--t2);font-size:14px">No TB targets available yet.</div>`;
       } else {
-        const note = `<div style="color:var(--t3);font-size:11px;margin-bottom:10px">Top ${top.length} TB targets · scoring inherits TB Targets tab model (away-9th bonus, park, weather, splits)</div>`;
+        const note = `<div style="color:var(--t3);font-size:11px;margin-bottom:10px">Top ${top.length} TB targets · Min 50 PA · Min 20 SP IP · scoring inherits TB Targets tab model (away-9th bonus, park, weather, splits)</div>`;
         bodyHTML = note + top.map((t, i) => mkTBBoardRow(t, i + 1)).join('');
       }
     }
