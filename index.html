@@ -1234,35 +1234,48 @@ async function enrichPitchers(games) {
           // we'll batch-fetch it from /people below. Mark as missing for now; hand
           // gets backfilled before this function returns.
           lu.push({ name:p.person?.fullName||'', player_id:pid, hand:'R', ord:i+1,
-            _handMissing: true,
+            _handMissing: true, _statsMissing: true,
             k_pct:null,bb_pct:null,iso:null,slg:null,ops:null,woba:null,wrc_plus:null,hh_pct:null,
-            ev:null,cont:null,barrel:null,avg:null, vsL:{}, vsR:{}, dkSalary:null, dkPos:null });
+            ev:null,cont:null,barrel:null,avg:null,pa:null, vsL:{}, vsR:{}, dkSalary:null, dkPos:null });
         });
         if (side==='away') g.away_lu=lu; else g.home_lu=lu;
       }
     } catch {}
   }));
 
-  // Batch-fetch real batSide for every batter we just slotted into a lineup.
-  // /people supports comma-separated personIds in a single call — one round-trip
-  // for the whole slate rather than 18×15 individual calls.
+  // Batch-fetch real batSide AND real season hitting stats for every batter we
+  // just slotted into a confirmed lineup. /people supports comma-separated
+  // personIds AND a stats hydrate in a single call — one round-trip for the
+  // whole slate rather than one fetch per player.
+  //
+  // Why this matters: previously, confirmed-lineup batters never got real
+  // individual season stats at all (only roster-estimate/unconfirmed-lineup
+  // batters did, via fetchRosterEstimate below). Confirmed batters sat on
+  // null avg/slg/ops until AI enrichment ran. This closes that gap so a
+  // batter's actual season performance is present from the first load.
   const allBatterIds = [...new Set(
     games.flatMap(g => [...(g.away_lu||[]), ...(g.home_lu||[])].map(b => b.player_id))
   )].filter(Boolean);
 
   if (allBatterIds.length) {
     try {
+      const season = activeStatsSeason(S.date || todayISO());
+      const hydrate = encodeURIComponent(`stats(group=[hitting],type=[season],season=${season})`);
       // MLB caps URL length; chunk to ~80 IDs per call to be safe
-      const handMapB = {};
+      const handMapB = {}, statsMapB = {};
       const chunks = [];
       for (let i = 0; i < allBatterIds.length; i += 80) chunks.push(allBatterIds.slice(i, i + 80));
       await Promise.allSettled(chunks.map(async chunk => {
-        const d = await proxyFetch(`${MLB_BASE}/people?personIds=${chunk.join(',')}`);
+        const d = await proxyFetch(`${MLB_BASE}/people?personIds=${chunk.join(',')}&hydrate=${hydrate}`);
         for (const p of (d?.people || [])) {
-          if (p?.id && p?.batSide?.code) handMapB[p.id] = p.batSide.code;
+          if (!p?.id) continue;
+          if (p.batSide?.code) handMapB[p.id] = p.batSide.code;
+          const st = p.stats?.find(s => s.group?.displayName === 'hitting' && s.type?.displayName === 'season')
+                       ?.splits?.[0]?.stat;
+          if (st) statsMapB[p.id] = st;
         }
       }));
-      // Backfill hand on every batter we successfully resolved
+      // Backfill hand + real stats on every batter we successfully resolved
       for (const g of games) {
         for (const lu of [g.away_lu || [], g.home_lu || []]) {
           for (const b of lu) {
@@ -1270,10 +1283,23 @@ async function enrichPitchers(games) {
               b.hand = handMapB[b.player_id];
               b._handMissing = false;
             }
+            const st = statsMapB[b.player_id];
+            if (st) {
+              const avg = parseFloat(st.avg) || null;
+              const slg = parseFloat(st.slg) || null;
+              b.avg     = avg;
+              b.slg     = slg;
+              b.ops     = parseFloat(st.ops) || null;
+              b.iso     = (slg != null && avg != null) ? R(slg - avg, 3) : null;
+              b.k_pct   = (st.strikeOuts && st.atBats) ? R(parseFloat(st.strikeOuts)/parseFloat(st.atBats)*100, 1) : null;
+              b.bb_pct  = (st.baseOnBalls && st.plateAppearances) ? R(parseFloat(st.baseOnBalls)/parseFloat(st.plateAppearances)*100, 1) : null;
+              b.pa      = parseInt(st.plateAppearances) || 0;
+              b._statsMissing = false;
+            }
           }
         }
       }
-    } catch (e) { console.warn('Batter handedness batch fetch failed:', e.message); }
+    } catch (e) { console.warn('Batter handedness/stats batch fetch failed:', e.message); }
   }
 
   // For any games where lineups weren't posted yet, fetch roster estimates
