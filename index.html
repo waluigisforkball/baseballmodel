@@ -455,6 +455,31 @@ body{background:var(--bg);color:var(--t);font-family:var(--fb);font-size:15px;li
 /* ─── NEW HEATMAP TB TOGGLE ─── */
 .hm-toggle.on-tb{background:var(--pu);color:#fff;border-color:var(--pu)}
 
+/* ─── INFO ICON / PROVENANCE TOOLTIP ─── */
+.info-ic{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:13px;height:13px;border-radius:50%;
+  background:var(--bg4);color:var(--t3);font-size:9px;font-weight:700;
+  cursor:help;margin-left:4px;position:relative;flex-shrink:0;
+  vertical-align:middle;border:1px solid var(--b1);line-height:1;
+}
+.info-ic:hover,.info-ic:focus{background:var(--bg5);color:var(--t)}
+.info-tip{
+  display:none;position:absolute;z-index:999;bottom:calc(100% + 6px);left:50%;
+  transform:translateX(-50%);background:var(--bg3);border:1px solid var(--b2);
+  border-radius:8px;padding:9px 11px;width:230px;font-size:10px;line-height:1.5;
+  font-weight:400;text-align:left;color:var(--t2);box-shadow:0 4px 16px rgba(0,0,0,.5);
+  white-space:normal;
+}
+.info-ic:hover .info-tip,.info-ic:focus .info-tip{display:block}
+.info-src-row{display:flex;align-items:center;gap:5px;margin-bottom:5px;font-weight:700;font-size:9px;letter-spacing:.3px;text-transform:uppercase}
+.info-src-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.info-src-dot.real{background:var(--g)}
+.info-src-dot.ai{background:var(--pu)}
+.info-src-dot.synthetic{background:var(--t3)}
+.info-src-dot.computed{background:var(--bl)}
+.info-method{color:var(--t3);font-size:9.5px;line-height:1.55}
+
 /* ─── CHARTS TAB ─── */
 .charts-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
 .chart-panel{background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r2);overflow:hidden}
@@ -1295,6 +1320,7 @@ async function enrichPitchers(games) {
               b.bb_pct  = (st.baseOnBalls && st.plateAppearances) ? R(parseFloat(st.baseOnBalls)/parseFloat(st.plateAppearances)*100, 1) : null;
               b.pa      = parseInt(st.plateAppearances) || 0;
               b._statsMissing = false;
+              b._statSrc = 'real';
             }
           }
         }
@@ -1364,6 +1390,7 @@ async function fetchRosterEstimate(g, side) {
           pa:     parseInt(st.plateAppearances) || 0, // for sample-size filtering in TB Targets
           vsL:{}, vsR:{}, dkSalary:null, dkPos:null,
           _estimated: true,
+          _statSrc: (st.avg != null) ? 'real' : undefined,
         };
       } catch { return null; }
     }));
@@ -2869,7 +2896,7 @@ ${!w.dome&&w.precip>=30?`<div class="ec neg">🌧 ${w.precip}%</div>`:''}
 </div></div>
 <div class="cftr"><div class="badges">${e.badges.map(mkBdg).join('')}</div>
 <div style="display:flex;align-items:center;gap:8px;font-family:var(--fm);font-size:11px">
-<span style="color:var(--g)">K:${e.ke}</span><span style="color:var(--o)">HR:${e.hre}</span><span style="color:var(--y);font-weight:700">⭐${e.composite}</span>
+<span style="color:var(--g)">K:${e.ke}</span><span style="color:var(--o)">HR:${e.hre}</span><span style="color:var(--y);font-weight:700">⭐${e.composite}${infoIcon('computed', `Stat Score × ${100-S.oddsWt}% + Odds Signal × ${S.oddsWt}% (Edges Odds Wt slider). Stat Score blends K Edge, HR/Power, and Over/Under Env — all pure model, no market input. Full breakdown in the game detail view.`)}</span>
 </div></div></div>`;
 }
 function mkPit(p,lbl){const hc=`h${p.hand||'R'}`;const ai=p._ai?`<span class="ailbl">AI</span>`:'';return`<div><div class="cpl">${lbl}</div><div class="cpn">${p.name||'TBD'}<span class="hb ${hc}">${p.hand||'?'}</span>${ai}</div><div class="cpst"><div class="cs"><div class="cs-v">${F(p.era)}</div><div class="cs-l">ERA</div></div><div class="cs"><div class="cs-v">${F(p.fip)}</div><div class="cs-l">FIP</div></div><div class="cs"><div class="cs-v">${F(p.k9)}</div><div class="cs-l">K/9</div></div><div class="cs"><div class="cs-v">${FP(p.k_pct)}</div><div class="cs-l">K%</div></div><div class="cs"><div class="cs-v">${F(p.whip)}</div><div class="cs-l">WHIP</div></div></div></div>`;}
@@ -4156,7 +4183,25 @@ function mkDetail(g){
 </div></div>
 <div class="edge-panel">
 <div style="font-family:var(--fm);font-size:9px;font-weight:700;letter-spacing:1.5px;color:var(--t3);text-transform:uppercase;flex-basis:100%;margin-bottom:3px">EDGE SCORES · Odds weight: ${S.oddsWt}%</div>
-${[['K Edge',e.ke,'var(--g)'],['K/9 Adj',e.kAdj,'var(--teal)'],['HR/Power',e.hre,'var(--o)'],['TB Away',e.tbAway,'var(--pu)'],['TB Home',e.tbHome,'var(--pu)'],['Over Env',e.ov,'var(--r)'],['Under Env',e.un,'var(--bl)'],['Stat Score',e.statComp,'var(--teal)'],['Odds Signal',od?e.oddsSignal:'N/A','var(--y)'],['⭐ Composite',e.composite,'var(--y)']].map(([l,v,c])=>`<div class="ep-score"><div class="ep-val" style="color:${c}">${v}</div><div class="ep-lbl">${l}</div></div>`).join('')}
+${(() => {
+  const EDGE_METHOD = {
+    'K Edge':      'Pitcher K% ×1.4 + opposing team K% ×0.7 + Chase% ×0.5 + (100−Contact%) ×0.35 + Stuff+ delta ×0.08, ÷20. Uses overall (not hand-split) rates — the higher of the two starters\' scores.',
+    'K/9 Adj':     'Hand-adjusted version: each starter\'s K% specifically vs. the opposing lineup\'s handedness mix, plus the opponent\'s K% specifically vs. that starter\'s hand, plus Chase%. Summed across both starters.',
+    'HR/Power':    'Opponent ISO ×22 + Barrel% ×0.9 + starter HR/9 ×3.5 + Fly Ball% ×0.14 + park HR factor delta ×0.1 — scaled by wind (out ×1.2, in ×0.75) and temperature. Higher of the two matchups.',
+    'TB Away':     'Away lineup\'s average SLG (or TB rate) vs. the home starter\'s throwing hand, averaged across the lineup.',
+    'TB Home':     'Home lineup\'s average SLG (or TB rate) vs. the away starter\'s throwing hand, averaged across the lineup.',
+    'Over Env':    'Combined starter ERA ×0.75 + combined team OPS ×5.5 + park run factor delta ×0.1 + temperature delta ×0.03 + wind bonus (out +0.55 / in −0.45).',
+    'Under Env':   'Combined K% ×0.25 + (5 − combined FIP) ×1.4 + park run factor delta (inverted) ×0.09 + combined GB% ×0.04 + wind-in bonus.',
+    'Stat Score':  'K Edge ×35% + HR/Power ×30% + the higher of Over/Under Env ×35%, normalized 0–1. Pure model — no market input.',
+    'Odds Signal': 'Bonus if the market total sits in the range that favors the Over/Under lean, plus a bonus if either team\'s best moneyline is +140 or worse while Stat Score is still strong (possible market underpricing).',
+    '⭐ Composite': `Stat Score × ${100-S.oddsWt}% + Odds Signal × ${S.oddsWt}%. The split is set by the Edges Odds Wt slider up top — this is the ONLY score on this page the slider touches.`,
+  };
+  const tiles = [['K Edge',e.ke,'var(--g)'],['K/9 Adj',e.kAdj,'var(--teal)'],['HR/Power',e.hre,'var(--o)'],['TB Away',e.tbAway,'var(--pu)'],['TB Home',e.tbHome,'var(--pu)'],['Over Env',e.ov,'var(--r)'],['Under Env',e.un,'var(--bl)'],['Stat Score',e.statComp,'var(--teal)'],['Odds Signal',od?e.oddsSignal:'N/A','var(--y)'],['⭐ Composite',e.composite,'var(--y)']];
+  return tiles.map(([l,v,c])=>{
+    const srcTier = l==='Odds Signal' ? (od?'real':null) : 'computed';
+    return `<div class="ep-score"><div class="ep-val" style="color:${c}">${v}</div><div class="ep-lbl">${l}${infoIcon(srcTier, EDGE_METHOD[l]||'')}</div></div>`;
+  }).join('');
+})()}
 <div style="margin-left:auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap">${e.badges.map(mkBdg).join('')}</div>
 </div>
 ${odP}
@@ -4335,7 +4380,7 @@ function batterSplitHeatmap(lineup,pitcher){
   const pitRow=`<tr style="background:rgba(28,34,48,.95);border-bottom:2px solid var(--b2)">
 <td style="padding:5px 6px;text-align:center;color:var(--t3);font-size:10px">SP</td>
 <td style="padding:5px 8px" colspan="3">
-  <div style="font-size:10px;font-weight:700;color:var(--t2)">${pitcher.name} — Pitcher Splits ${pitcher._ai?'<span class="ailbl">AI est.</span>':''}</div>
+  <div style="font-size:10px;font-weight:700;color:var(--t2)">${pitcher.name} — Pitcher Splits ${pitcher._ai?'<span class="ailbl">AI est.</span>':''}${infoIcon(pitcherSplitSrc(pitcher), pitcher._ai ? 'AI-estimated vs-hand splits for this pitcher.' : 'Formula-derived vs-hand splits (fixed multiplier off this pitcher\'s overall rates) — not fetched from a real vs-hand data source. Run Slate Breakdown for AI estimates.')}</div>
   <div style="font-size:9px;color:var(--t3);margin-top:1px;display:flex;gap:12px;flex-wrap:wrap">
     <span>vs LHH: ERA ${F(pL.era??pitcher.era)} · K/9 ${F(pL.k9??pitcher.k9)} · K% ${FP(pL.k_pct??pitcher.k_pct)} · wOBA ${F3(pL.woba??pitcher.woba_vs)}</span>
     <span>vs RHH: ERA ${F(pR.era??pitcher.era)} · K/9 ${F(pR.k9??pitcher.k9)} · K% ${FP(pR.k_pct??pitcher.k_pct)} · wOBA ${F3(pR.woba??pitcher.woba_vs)}</span>
@@ -4345,14 +4390,25 @@ ${cols.map(c=>`<td style="padding:3px 4px"><div style="background:var(--bg4);bor
 <td style="padding:3px 4px"><div style="background:var(--bg4);border-radius:4px;padding:4px 3px;text-align:center;min-height:28px;display:flex;align-items:center;justify-content:center;font-family:var(--fm);font-size:10px;color:var(--t2)">${pL.ops?F3(pL.ops):'—'}</div></td>
 <td style="padding:3px 4px"><div style="background:var(--bg4);border-radius:4px;padding:4px 3px;text-align:center;min-height:28px;display:flex;align-items:center;justify-content:center;font-family:var(--fm);font-size:10px;color:var(--t2)">${pR.ops?F3(pR.ops):'—'}</div></td>
 </tr>`;
+  const anyAI = sorted.some(b => b._splitAI);
+  const splitSrc = anyAI ? 'ai' : 'synthetic';
+  const advIcon = infoIcon(null,
+    `<b style="color:var(--t)">Adv</b> compares only the batter's hand vs. the pitcher's hand — same-hand favors the pitcher, opposite-hand favors the batter. ` +
+    `It does <b>not</b> look at this specific batter's actual history vs. that hand — a reverse-split hitter (e.g. a lefty who's actually good vs. lefties) gets the same tag as everyone else. ` +
+    `For the batter's real tendency vs. this hand, look at the K%/SLG/OPS/etc. columns to the right instead.`);
+  const splitIcon = infoIcon(splitSrc,
+    `${anyAI
+      ? 'These vs-hand splits were estimated by Claude (Slate Breakdown was run for this slate).'
+      : 'These vs-hand splits are a formula: the batter\'s overall season line, adjusted up/down by a fixed multiplier for this handedness matchup. It is built on the same platoon assumption as the Adv tag, so it can\'t surface a genuine reverse split — it will always agree with the tag next to it.'}` +
+    ` Run <b style="color:var(--pu)">✦ Slate Breakdown</b> for AI-estimated splits, which have a better (though still not perfect) chance of catching an unusual split.`);
   const thead=`<tr>
 <th style="width:20px">#</th>
 <th style="text-align:left;min-width:130px">Batter</th>
 <th style="text-align:center">H</th>
-<th style="text-align:center;min-width:54px">vs ${ph}HP</th>
+<th style="text-align:center;min-width:54px">vs ${ph}HP${advIcon}</th>
 ${cols.map(c=>`<th style="min-width:60px">${c.l}<br><span style="font-size:8px;color:var(--t3);font-weight:400">vs ${ph}HP</span></th>`).join('')}
 <th style="min-width:50px">OPS<br><span style="font-size:8px;color:var(--t3);font-weight:400">vsL</span></th>
-<th style="min-width:50px">OPS<br><span style="font-size:8px;color:var(--t3);font-weight:400">vsR</span></th>
+<th style="min-width:50px">OPS<br><span style="font-size:8px;color:var(--t3);font-weight:400">vsR${splitIcon}</span></th>
 </tr>`;
   const opsCol={lo:.630,hi:.970,inv:false};
   const rows=sorted.map(b=>{
@@ -4405,6 +4461,54 @@ function teamComp(g,at,ht){
 }
 
 function ht2(val,thr,inv){const v=parseFloat(val);if(isNaN(v))return'';const[t1,t2,t3,t4]=thr;let i=v>=t4?4:v>=t3?3:v>=t2?2:v>=t1?1:0;if(inv)i=4-i;return['hvl','hlw','hm','hmh','hh'][i]||'';}
+
+// ─────────────────────────────────────────────────────────────
+// INFO ICONS — provenance + methodology tooltips
+// ─────────────────────────────────────────────────────────────
+// srcTier: 'real' (fetched MLB stat) | 'ai' (Claude estimate, manual-trigger)
+//          | 'synthetic' (formula-derived fallback, no external lookup)
+//          | 'computed' (a score built from a mix of the above — see method text)
+//          | null (skip the provenance row, methodology-only tooltip)
+const SRC_LABEL = {
+  real:      'Real stat (MLB API)',
+  ai:        'AI estimate (Slate Breakdown)',
+  synthetic: 'Modeled (synthetic fallback)',
+  computed:  'Computed from mixed sources',
+};
+function infoIcon(srcTier, methodHtml) {
+  const srcRow = srcTier
+    ? `<div class="info-src-row"><span class="info-src-dot ${srcTier}"></span>${SRC_LABEL[srcTier]||srcTier}</div>`
+    : '';
+  return `<span class="info-ic" tabindex="0" onclick="event.stopPropagation()">ⓘ<span class="info-tip">${srcRow}<div class="info-method">${methodHtml}</div></span></span>`;
+}
+// Batter's TOP-LEVEL season stats (avg/slg/ops/k_pct/bb_pct/pa) — real if the
+// batch stat fetch or roster-estimate fetch found this player, else the
+// formulas throughout the app fall back to a league-average constant.
+function batterStatSrc(b) { return b?._statSrc === 'real' ? 'real' : 'synthetic'; }
+// Batter's vsL/vsR HAND SPLITS — AI if Slate Breakdown ran and returned this
+// player, else synthetic (a fixed multiplier applied to the top-level stat —
+// see fbBatterSplits — which means it can never disagree with the platoon
+// assumption baked into the multiplier itself).
+function batterSplitSrc(b) { return b?._splitAI ? 'ai' : 'synthetic'; }
+// Pitcher fields split into what's actually fetched from MLB (era/whip/k9/bb9/
+// hr9/k_pct/bb_pct, via fetchPStat) vs everything else (fip/xfip/chase/cont/
+// stuff_plus/vsL/vsR), which is AI-or-synthetic only — MLB's public API doesn't
+// expose those directly.
+const PITCHER_REAL_FIELDS = new Set(['era','whip','k9','bb9','hr9','k_pct','bb_pct']);
+function pitcherFieldSrc(sp, field) {
+  if (PITCHER_REAL_FIELDS.has(field)) return 'real';
+  return sp?._ai ? 'ai' : 'synthetic';
+}
+function pitcherSplitSrc(sp) { return sp?._ai ? 'ai' : 'synthetic'; }
+// Team offense: k_pct/bb_pct/avg/slg/ops/iso are real (fetchTStat, season MLB
+// hitting stats). woba/wrc_plus/hh_pct/ev/barrel/cont and vsLHP/vsRHP splits
+// are AI-or-synthetic only.
+const TEAM_REAL_FIELDS = new Set(['k_pct','bb_pct','avg','slg','ops','iso']);
+function teamFieldSrc(ts, field) {
+  if (TEAM_REAL_FIELDS.has(field)) return 'real';
+  return ts?._ai ? 'ai' : 'synthetic';
+}
+function teamSplitSrc(ts) { return ts?._ai ? 'ai' : 'synthetic'; }
 
 // ─────────────────────────────────────────────────────────────
 // UTILITIES
