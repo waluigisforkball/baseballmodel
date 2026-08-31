@@ -76,6 +76,8 @@ body{background:var(--bg);color:var(--t);font-family:var(--fb);font-size:15px;li
 .ks-dot{cursor:pointer}
 .ks-dot circle{transition:r .13s}
 .ks-dot:hover circle:first-child{r:10}
+.ks-legend{display:flex;gap:16px;flex-wrap:wrap;padding:8px 8px 6px;font-size:10px;color:var(--t3);line-height:1.6}
+.ks-key{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle}
 
 /* TB lineup bars */
 .tbl-row{display:flex;align-items:center;gap:12px;background:var(--bg2);border:1px solid var(--b1);
@@ -6158,28 +6160,50 @@ function renderKScatter(rows) {
     <text x="${PL - 8}" y="${y(t) + 3}" fill="var(--t3)" font-size="10" text-anchor="end" font-family="var(--fm)">${t}%</text>
   `).join('');
 
-  // Target zone — upper-right quadrant, drawn from absolute thresholds
+  // Both tails are actionable — same philosophy as the YRFI strip.
+  // Upper-right: high-K pitcher into a high-K lineup → over lean.
+  // Lower-left:  low-K pitcher into a contact lineup  → under lean.
   const zx = x(26), zy = y(25.5);
+  const ux = x(21), uy = y(21.5);
   const zone = `<rect x="${zx}" y="${PT}" width="${PL + plotW - zx}" height="${zy - PT}"
       fill="var(--g)" opacity=".07"/>
     <text x="${PL + plotW - 8}" y="${PT + 16}" fill="var(--g)" font-size="10" text-anchor="end"
-      font-family="var(--fm)" opacity=".8" letter-spacing="1">TARGET ZONE</text>`;
+      font-family="var(--fm)" opacity=".85" letter-spacing="1">OVER ZONE ↗</text>
+    <rect x="${PL}" y="${uy}" width="${ux - PL}" height="${PT + plotH - uy}"
+      fill="var(--r)" opacity=".06"/>
+    <text x="${PL + 8}" y="${PT + plotH - 8}" fill="var(--r)" font-size="10" text-anchor="start"
+      font-family="var(--fm)" opacity=".85" letter-spacing="1">↙ UNDER ZONE</text>`;
+
+  // A flag that fires on every dot communicates nothing. When a condition applies
+  // to the WHOLE slate (typical pre-lineup), it belongs in the banner, not as 30
+  // identical satellite dots. Per-dot markers are reserved for pitchers that
+  // differ from the slate norm — and they're color-coded by cause.
+  const nEst  = rows.filter(r => r.score.mix.estimated).length;
+  const nNoL3 = rows.filter(r => !r.score.hasL3).length;
+  const allEst  = nEst  === rows.length;
+  const allNoL3 = nNoL3 === rows.length;
 
   const dots = rows.map(r => {
     const cx = x(r.score.pK_weighted), cy = y(r.score.oK);
     const col = kBoardGradientColor(r.score.pct);
     const last = (r.sp.name || 'TBD').split(' ').pop();
     const showLbl = r.score.pct >= 55;
-    const flag = !r.score.hasL3 || r.score.mix.estimated;
+    const fEst  = r.score.mix.estimated && !allEst;   // amber  — lineup not posted
+    const fNoL3 = !r.score.hasL3        && !allNoL3;  // slate  — no L3 workload log
     const line = r.prop && r.prop.line != null ? `o${r.prop.line}` : 'no line';
+    const notes = [];
+    if (r.score.mix.estimated) notes.push('lineup not posted — league-average L/R mix');
+    if (!r.score.hasL3)        notes.push('no L3 log — workload bonus not applied');
+    if (r.score.thin)          notes.push('small sample — K% regressed toward league mean');
     return `<g class="ks-dot" data-gid="${r.gameId}" data-spid="${r.spId}">
       <circle cx="${cx}" cy="${cy}" r="7" fill="${col}" stroke="var(--bg)" stroke-width="2"/>
-      ${flag ? `<circle cx="${cx + 7}" cy="${cy - 7}" r="3" fill="#ff9f0a" stroke="var(--bg)" stroke-width="1.5"/>` : ''}
+      ${fEst  ? `<circle cx="${cx + 7}" cy="${cy - 7}" r="3" fill="#ff9f0a" stroke="var(--bg)" stroke-width="1.5"/>` : ''}
+      ${fNoL3 ? `<circle cx="${cx + 7}" cy="${cy + 7}" r="3" fill="var(--t3)" stroke="var(--bg)" stroke-width="1.5"/>` : ''}
       ${showLbl ? `<text x="${cx}" y="${cy - 13}" fill="${col}" font-size="9" font-weight="700"
          text-anchor="middle" font-family="var(--fb)">${last}</text>` : ''}
       <title>${r.sp.name} (${r.sp.hand}) vs ${r.oppAbbr}
 K% ${r.score.pK_weighted.toFixed(1)} · Opp K% ${r.score.oK.toFixed(1)}
-Composite ${r.score.pct} · Prop ${line}${flag ? '\n⚠ ' + (!r.score.hasL3 ? 'no L3 workload data' : 'lineup not posted') : ''}</title>
+Composite ${r.score.pct} · Prop ${line}${notes.length ? '\n⚠ ' + notes.join('\n⚠ ') : ''}</title>
     </g>`;
   }).join('');
 
@@ -6192,6 +6216,13 @@ Composite ${r.score.pct} · Prop ${line}${flag ? '\n⚠ ' + (!r.score.hasL3 ? 'n
         font-family="var(--fb)" letter-spacing=".5" transform="rotate(-90 14 ${PT + plotH / 2})">OPPONENT LINEUP K%</text>
       ${dots}
     </svg>
+    <div class="ks-legend">
+      ${allEst  ? '<span><b style="color:#ff9f0a">No lineups posted</b> — every X position uses a league-average L/R mix</span>'
+                : (nEst ? `<span><span class="ks-key" style="background:#ff9f0a"></span>lineup not posted (${nEst})</span>` : '')}
+      ${allNoL3 ? '<span><b style="color:var(--t3)">No L3 logs on this slate</b> — workload bonus off for everyone</span>'
+                : (nNoL3 ? `<span><span class="ks-key" style="background:var(--t3)"></span>no L3 log (${nNoL3})</span>` : '')}
+      ${(!nEst && !nNoL3) ? '<span style="color:var(--t3)">All starters on real lineup + workload data</span>' : ''}
+    </div>
   </div>`;
 }
 
