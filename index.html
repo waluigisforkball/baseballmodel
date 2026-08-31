@@ -42,6 +42,15 @@
 body{background:var(--bg);color:var(--t);font-family:var(--fb);font-size:15px;line-height:1.65;min-height:100vh;-webkit-font-smoothing:antialiased}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bg5);border-radius:10px}
 
+/* ─── RUNDOWN ─── */
+.rd-h{font-family:var(--fm);font-size:10px;font-weight:700;letter-spacing:1.4px;color:var(--g);
+  margin:20px 0 9px;padding-bottom:6px;border-bottom:1px solid var(--b1)}
+.rd-h:first-child{margin-top:0}
+.rd-t{font-size:12.5px;color:var(--t2);line-height:1.7;margin-bottom:7px}
+.rd-b{font-size:12.5px;color:var(--t2);line-height:1.7;margin-bottom:8px;padding-left:15px;position:relative}
+.rd-b:before{content:'·';position:absolute;left:3px;color:var(--t3);font-weight:700}
+.rd-b b,.rd-t b{color:var(--t)}
+
 /* ─── OVERVIEW ─── */
 .ov-sec{margin-bottom:26px}
 .ov-h{display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--b1)}
@@ -608,6 +617,7 @@ canvas{max-width:100%}
       <button class="mode-btn bet on" id="modeBet">🎲 BETTING</button>
       <button class="mode-btn dfs" id="modeDfs">💰 DFS</button>
     </div>
+    <button class="btn sec" id="rundownBtn" onclick="showRundown()" style="background:var(--bg3);border-color:var(--g);color:var(--g)">≡ Rundown</button>
     <button class="btn sec" id="guideBtn" onclick="showGuide()" style="background:var(--bg3);border-color:var(--y);color:var(--y)">? Guide</button>
     <button class="btn sec" id="refreshBtn">↺ Refresh</button>
   </div>
@@ -813,6 +823,20 @@ canvas{max-width:100%}
         <div class="spin"></div> Analyzing today's slate…
       </div>
     </div>
+  </div>
+</div>
+
+<div id="rundownModal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.75);overflow-y:auto;padding:20px">
+  <div style="max-width:760px;margin:0 auto;background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r3);overflow:hidden">
+    <div style="padding:16px 22px;background:var(--bg3);border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div style="font-family:var(--fd);font-size:20px;letter-spacing:2px">SLATE <em style="color:var(--g);font-style:normal">RUNDOWN</em>
+        <span id="rundownDate" style="font-size:12px;color:var(--t3);font-family:var(--fm);letter-spacing:0;margin-left:8px"></span></div>
+      <div style="display:flex;gap:8px">
+        <button id="rdCopyBtn" onclick="copyRundown()" style="background:none;border:1px solid var(--g);color:var(--g);padding:5px 12px;border-radius:var(--r1);cursor:pointer;font-size:13px">⧉ Copy</button>
+        <button onclick="document.getElementById('rundownModal').style.display='none'" style="background:none;border:1px solid var(--b1);color:var(--t2);padding:5px 12px;border-radius:var(--r1);cursor:pointer;font-size:13px">✕ Close</button>
+      </div>
+    </div>
+    <div style="padding:20px 26px 26px" id="rundownContent"></div>
   </div>
 </div>
 
@@ -6010,6 +6034,169 @@ function mkTBBoardRow(t, rank) {
   </div>`;
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// ─── SLATE RUNDOWN ─────────────────────────────────────────────
+// Deterministic text digest of the slate. Templated from the same numbers
+// the Overview renders — no AI, no credits, no network. Every claim carries
+// the figure behind it and the delta from league mean, so it can be read
+// standalone or pasted into notes.
+//
+// Design rule: a rundown that always finds something says nothing. This one
+// is allowed to report a flat slate, same as Top Signals.
+// ═══════════════════════════════════════════════════════════════
+
+const RD_LG = { teamK: 22.3, tbLineup: 0.455 };  // league reference points for deltas
+
+function _sgn(n, d = 1) { const v = +n; return (v >= 0 ? '+' : '') + v.toFixed(d); }
+
+function buildRundown() {
+  const gs = filteredGames();
+  const L = [];                       // [{h: heading} | {t: line} | {b: bullet}]
+  if (!gs.length) return [{ t: 'No games on this slate.' }];
+
+  let kRows = [];
+  try { kRows = buildKBoardRows(); } catch (e) { kRows = []; }
+  let tb = { rows: [], mins: null };
+  try { tb = buildTBLineups(); } catch (e) {}
+
+  for (const r of kRows) r.mkt = r.mkt || kMarketEdge(r.score.pct, r.prop);
+
+  // ── Slate shape ──
+  const kQual  = kRows.filter(r => r.score.pct >= SIG_THRESH.k);
+  const tbQual = tb.rows.filter(r => r.pct >= SIG_THRESH.tb);
+  const yHi    = gs.filter(g => g.yrfi && g.yrfi.pct >= SIG_THRESH.yrfiHi);
+  const yLo    = gs.filter(g => g.yrfi && g.yrfi.pct <= SIG_THRESH.yrfiLo);
+  const mkts   = kRows.filter(r => r.mkt && r.mkt.strength >= 45);
+  const total  = kQual.length + tbQual.length + yHi.length + yLo.length + mkts.length;
+
+  const kAvg = kRows.length ? kRows.reduce((s, r) => s + r.score.pct, 0) / kRows.length : null;
+  L.push({ h: 'SLATE SHAPE' });
+  L.push({ t: `${gs.length} game${gs.length === 1 ? '' : 's'} · ${kRows.length} starters · `
+    + (kAvg != null ? `average K matchup ${Math.round(kAvg)}/100` : 'no K scores') });
+
+  if (!total) {
+    L.push({ t: 'Nothing clears the absolute thresholds. This is a flat slate — no matchup is far enough from league average to act on. That is a real answer, not missing data.' });
+  } else {
+    L.push({ t: `${total} item${total === 1 ? '' : 's'} clear the bar: `
+      + [kQual.length && `${kQual.length} K`, mkts.length && `${mkts.length} market`,
+         tbQual.length && `${tbQual.length} TB`, (yHi.length + yLo.length) && `${yHi.length + yLo.length} first-inning`]
+        .filter(Boolean).join(' · ') });
+  }
+
+  // ── Strikeouts ──
+  if (kQual.length) {
+    L.push({ h: 'STRIKEOUTS' });
+    for (const r of kQual.slice(0, 4)) {
+      const dK = r.score.pK_weighted - LEAGUE_MEAN.pK;
+      const dO = r.score.oK - RD_LG.teamK;
+      const line = r.prop && r.prop.line != null ? `o${r.prop.line}` : 'no line posted';
+      const caveat = [
+        r.score.thin && 'small sample, regressed',
+        r.score.mix.estimated && 'lineup not posted',
+        !r.score.hasL3 && 'no workload data',
+      ].filter(Boolean).join('; ');
+      L.push({ b: `<b>${r.sp.name}</b> (${r.sp.hand}) vs ${r.oppAbbr} — <b>${r.score.pct}</b>/100. `
+        + `K% ${r.score.pK_weighted.toFixed(1)} (${_sgn(dK)} vs lg ${LEAGUE_MEAN.pK}), `
+        + `opp lineup ${r.score.oK.toFixed(1)}% (${_sgn(dO)} vs lg ${RD_LG.teamK}). Book: ${line}.`
+        + (caveat ? ` <i style="color:#ff9f0a">⚠ ${caveat}</i>` : '') });
+    }
+    if (kQual.length > 4) L.push({ t: `…${kQual.length - 4} more above ${SIG_THRESH.k}.` });
+  }
+
+  // ── Market disagreement ──
+  if (mkts.length) {
+    L.push({ h: 'WHERE THE BOOK DISAGREES' });
+    for (const r of mkts.sort((a, b) => b.mkt.strength - a.mkt.strength).slice(0, 4)) {
+      const m = r.mkt;
+      const tier = m.dir === 'over' ? `below the ${MKT.kHigh} high-line tier` : `above the ${MKT.kLow} low-line tier`;
+      L.push({ b: `<b>${r.sp.name}</b> — model ${r.score.pct}/100 leans <b>${m.dir}</b>, book posted <b>o${m.line}</b>, `
+        + `${m.gap} ${tier}. Strength ${m.strength}/100`
+        + (m.pSide != null ? `, book implies ${Math.round(m.pSide * 100)}% on the ${m.dir}${m.fair ? ' after devig' : ' (one-sided, still vigged)'}` : ', no prices')
+        + '.' });
+    }
+    L.push({ t: '<i>Directional only. This says the line looks mispriced relative to the model, not that the bet is +EV.</i>' });
+  }
+
+  // ── Total bases ──
+  if (tbQual.length) {
+    L.push({ h: 'TOTAL BASES' });
+    for (const r of tbQual.slice(0, 4)) {
+      const d = r.raw - RD_LG.tbLineup;
+      L.push({ b: `<b>${r.team}</b> vs ${r.oppSPName} (${r.spHand}) — <b>${r.pct}</b>/100. `
+        + `Top ${r.core.length} bats average ${r.raw.toFixed(3)} (${_sgn(d, 3)} vs lg ${RD_LG.tbLineup}).`
+        + (r.thin ? ` <i style="color:#ff9f0a">⚠ only ${r.qualified} bats qualify</i>` : '')
+        + (r.est ? ` <i style="color:#ff9f0a">⚠ roster estimate</i>` : '') });
+    }
+  }
+
+  // ── First inning ──
+  if (yHi.length || yLo.length) {
+    L.push({ h: 'FIRST INNING' });
+    for (const g of yHi.sort((a, b) => b.yrfi.pct - a.yrfi.pct).slice(0, 3))
+      L.push({ b: `<b>${g.away} @ ${g.home}</b> — YRFI <b>${g.yrfi.pct}%</b> (${g.away} ${g.yrfi.awayPct}% / ${g.home} ${g.yrfi.homePct}%). Lean yes.` });
+    for (const g of yLo.sort((a, b) => a.yrfi.pct - b.yrfi.pct).slice(0, 3))
+      L.push({ b: `<b>${g.away} @ ${g.home}</b> — YRFI <b>${g.yrfi.pct}%</b> (${g.away} ${g.yrfi.awayPct}% / ${g.home} ${g.yrfi.homePct}%). Lean no.` });
+    L.push({ t: '<i>Unaffected by lineups — built from team first-inning rates and starter vulnerability only.</i>' });
+  }
+
+  // ── Trust check ──
+  L.push({ h: 'WHAT TO DISCOUNT' });
+  const cav = [];
+  const nEst = kRows.filter(r => r.score.mix.estimated).length;
+  const nThin = kRows.filter(r => r.score.thin).length;
+  const nNoL3 = kRows.filter(r => !r.score.hasL3).length;
+  const nNoLine = kRows.filter(r => !r.prop || r.prop.line == null).length;
+  if (nEst === kRows.length && kRows.length) cav.push(`<b>No lineups posted.</b> Every K score uses a league-average 3L/5R/1S mix. Expect horizontal movement on the scatter once cards drop; Y positions and YRFI will not move.`);
+  else if (nEst) cav.push(`${nEst} of ${kRows.length} lineups not posted — those K scores will shift.`);
+  if (nThin) cav.push(`${nThin} pitcher${nThin === 1 ? '' : 's'} on small samples, regressed toward the ${LEAGUE_MEAN.pK}% league mean.`);
+  if (nNoL3 === kRows.length && kRows.length) cav.push(`No last-3-start logs on this slate — workload bonus is off for everyone.`);
+  else if (nNoL3) cav.push(`${nNoL3} missing workload data.`);
+  if (!S.oddsOk) cav.push(`<b>Odds unavailable</b> — no market comparison possible.`);
+  else if (nNoLine === kRows.length && kRows.length) cav.push(`No K props posted yet — market comparison unavailable.`);
+  else if (nNoLine) cav.push(`${nNoLine} pitchers have no posted K prop.`);
+  if (tb.mins && tb.mins.scaled) cav.push(`Early season: sample gates scaled to ${tb.mins.batterPA} PA / ${tb.mins.pitcherIP} IP.`);
+  cav.push(`Bullpen figures anywhere in the app are a fixed team-pitching proxy and cannot separate bullpen from rotation. Do not bet off them.`);
+  cav.forEach(c => L.push({ b: c }));
+
+  return L;
+}
+
+// Plain-text version for copying into notes
+function rundownToText(lines) {
+  const strip = h => h.replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  const d = S.date || todayISO();
+  return `WALUIGI'S FORKBALL — SLATE RUNDOWN — ${d}\n`
+    + lines.map(l => l.h ? `\n${l.h}\n${'─'.repeat(l.h.length)}` : l.b ? `• ${strip(l.b)}` : strip(l.t)).join('\n');
+}
+
+function showRundown() {
+  const lines = buildRundown();
+  const body = lines.map(l =>
+    l.h ? `<div class="rd-h">${l.h}</div>`
+    : l.b ? `<div class="rd-b">${l.b}</div>`
+    : `<div class="rd-t">${l.t}</div>`
+  ).join('');
+  document.getElementById('rundownContent').innerHTML = body;
+  document.getElementById('rundownDate').textContent = S.date || todayISO();
+  document.getElementById('rundownModal').style.display = 'block';
+  window._rdText = rundownToText(lines);
+}
+
+function copyRundown() {
+  const btn = document.getElementById('rdCopyBtn');
+  const done = ok => { btn.textContent = ok ? '✓ Copied' : '✕ Failed'; setTimeout(() => { btn.textContent = '⧉ Copy'; }, 1600); };
+  const txt = window._rdText || '';
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(() => done(true)).catch(() => done(false));
+  } else {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = txt; document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta); done(true);
+    } catch { done(false); }
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // ─── MARKET DISAGREEMENT ───────────────────────────────────────
