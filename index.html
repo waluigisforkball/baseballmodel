@@ -42,6 +42,64 @@
 body{background:var(--bg);color:var(--t);font-family:var(--fb);font-size:15px;line-height:1.65;min-height:100vh;-webkit-font-smoothing:antialiased}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bg5);border-radius:10px}
 
+/* ─── OVERVIEW ─── */
+.ov-sec{margin-bottom:26px}
+.ov-h{display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--b1)}
+.ov-h-t{font-family:var(--fm);font-size:10px;font-weight:700;letter-spacing:1.4px;color:var(--t2);text-transform:uppercase}
+.ov-h-n{margin-left:auto;font-family:var(--fm);font-size:10px;color:var(--t3)}
+.ov-empty{background:var(--bg2);border:1px dashed var(--b2);border-radius:var(--r2);padding:26px 20px;text-align:center}
+.ov-empty-t{font-size:13px;font-weight:600;color:var(--t2)}
+.ov-empty-d{font-size:11px;color:var(--t3);margin-top:6px;line-height:1.6;max-width:520px;margin-left:auto;margin-right:auto}
+.ov-more{font-size:11px;color:var(--t3);padding:9px 4px 2px;text-align:center}
+.ov-note{background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r2);padding:11px 14px;font-size:11px;color:var(--t3);line-height:1.85}
+.ov-note code{font-family:var(--fm);background:var(--bg3);padding:1px 5px;border-radius:4px;color:var(--t2)}
+
+/* Confidence badges — one vocabulary everywhere */
+.conf-b{display:inline-block;font-family:var(--fm);font-size:9px;font-weight:700;letter-spacing:.4px;
+  padding:1px 5px;border-radius:5px;border:1px solid;margin-left:5px;vertical-align:middle;white-space:nowrap}
+
+/* Top Signals */
+.sig-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(238px,1fr));gap:11px}
+.sig-card{background:var(--bg2);border:1px solid var(--b1);border-left:3px solid;border-radius:var(--r2);
+  padding:11px 13px;cursor:pointer;transition:transform .14s,border-color .14s}
+.sig-card:hover{transform:translateY(-2px);border-color:var(--b2)}
+.sig-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.sig-kind{font-family:var(--fm);font-size:9px;font-weight:700;letter-spacing:1px}
+.sig-pct{font-family:var(--fm);font-size:17px;font-weight:700;line-height:1}
+.sig-title{font-size:13.5px;font-weight:600;color:var(--t);line-height:1.3}
+.sig-sub{font-size:11px;color:var(--t2);margin-top:2px}
+.sig-why{font-family:var(--fm);font-size:10px;color:var(--t3);margin-top:7px;line-height:1.55}
+
+/* K scatter */
+.ov-chart-wrap{background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r2);padding:10px 8px 4px}
+.ks-svg{width:100%;height:auto;display:block;overflow:visible}
+.ks-dot{cursor:pointer}
+.ks-dot circle{transition:r .13s}
+.ks-dot:hover circle:first-child{r:10}
+
+/* TB lineup bars */
+.tbl-row{display:flex;align-items:center;gap:12px;background:var(--bg2);border:1px solid var(--b1);
+  border-radius:var(--r2);padding:9px 13px;margin-bottom:7px;cursor:pointer;transition:border-color .14s}
+.tbl-row:hover{border-color:var(--pu)}
+.tbl-team{font-family:var(--fm);font-size:13px;font-weight:700;color:var(--t);width:52px;flex-shrink:0}
+.tbl-h{font-size:8px;color:var(--t3);margin-left:3px;vertical-align:super}
+.tbl-mid{flex:1;min-width:0}
+.tbl-meta{font-size:10.5px;color:var(--t3);margin-bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tbl-hand{font-family:var(--fm);font-size:9px;font-weight:700;padding:0 4px;border-radius:4px}
+.tbl-hand.hl{color:var(--r);background:var(--rd)}
+.tbl-hand.hr{color:var(--bl);background:var(--bld)}
+.tbl-track{height:6px;background:var(--bg4);border-radius:3px;overflow:hidden}
+.tbl-fill{height:100%;border-radius:3px;transition:width .3s}
+.tbl-pct{font-family:var(--fm);font-size:15px;font-weight:700;width:34px;text-align:right;flex-shrink:0}
+
+/* Drill-down highlight */
+.kbrow.hl-row{border-color:var(--g) !important;box-shadow:0 0 0 1px var(--g)}
+
+@media(max-width:600px){
+  .sig-grid{grid-template-columns:1fr}
+  .tbl-team{width:44px;font-size:12px}
+}
+
 /* ─── HEADER ─── */
 .hdr{display:flex;align-items:center;padding:0 20px;height:54px;background:var(--bg);border-bottom:1px solid var(--b1);position:sticky;top:0;z-index:200;gap:14px}
 .brand{display:flex;align-items:baseline;gap:8px;flex-shrink:0}
@@ -710,18 +768,18 @@ canvas{max-width:100%}
 
   <div id="slateView" style="display:none">
     <div class="vtabs" id="vtabBar">
-      <button class="vt on" data-v="cards">Matchup Cards</button>
-      <button class="vt" data-v="heatmap">🌍 Big Board</button>
-      <button class="vt" data-v="table" id="vtTable">📊 Table</button>
+      <button class="vt on" data-v="overview">◎ Overview</button>
+      <button class="vt" data-v="cards">Matchup Cards</button>
       <button class="vt" data-v="charts" id="vtCharts">📈 Pitcher Charts</button>
       <button class="vt" data-v="edges">Edge Rankings</button>
       <button class="vt" data-v="dfs" id="vtDfs" style="display:none;color:var(--pu)">💰 DFS</button>
       <button class="vt" data-v="tb" id="vtTB">🎯 TB Targets</button>
       <button class="vt" data-v="pitchmash" id="vtPitchMash">🔥 Pitch Mash</button>
-      <button class="vt" data-v="boards" id="vtBoards">🎲 Bet Boards</button>
+      <button class="vt" data-v="boards" id="vtBoards" style="display:none">🎲 Bet Boards</button>
       <button class="btn" id="dfsUploadTabBtn" onclick="document.getElementById('dfsFileInput').click()" style="display:none;margin-left:auto;background:var(--pu);font-size:11px;padding:4px 13px">📂 Upload DK Salaries</button>
     </div>
-    <div id="cardsView" class="cgrid"></div>
+    <div id="overviewView" style="display:none"></div>
+    <div id="cardsView" class="cgrid" style="display:none"></div>
     <div id="heatmapView" style="display:none"></div>
     <div id="tableView" style="display:none">
       <div class="tw"><table class="dt" id="sltbl"><thead id="tblHead"></thead><tbody id="stbody"></tbody></table></div>
@@ -962,7 +1020,7 @@ const TEAM_MAP = {
 // ─── STATE ───
 const S = {
   date:'', statsStart:'', statsEnd:'', days:30, oddsWt:30,
-  games:[], view:'cards', filter:'all',
+  games:[], view:'overview', filter:'all',
   sort:{ col:'comp', dir:'desc' },
   loading:false, aiDone:new Set(), oddsOk:false, activePreset:'30',
   mode:'bet',         // 'bet' | 'dfs'
@@ -1110,7 +1168,7 @@ function setMode(mode) {
   }
   if (mode === 'bet' && S.view === 'dfs') {
     S.view = 'cards';
-    document.querySelectorAll('.vt').forEach(x => x.classList.toggle('on', x.dataset.v === 'cards'));
+    document.querySelectorAll('.vt').forEach(x => x.classList.toggle('on', x.dataset.v === 'overview'));
   }
   renderView();
 }
@@ -2810,9 +2868,10 @@ function updatePropBar() {
 }
 
 function renderView() {
+  showEl('overviewView', S.view==='overview');
   showEl('cardsView',   S.view==='cards');
-  showEl('heatmapView', S.view==='heatmap');
-  showEl('tableView',   S.view==='table');
+  showEl('heatmapView', false);
+  showEl('tableView',   false);
   showEl('chartsView',  S.view==='charts');
   showEl('edgesView',   S.view==='edges');
   showEl('dfsView',     S.view==='dfs');
@@ -2820,9 +2879,8 @@ function renderView() {
   showEl('pitchmashView', S.view==='pitchmash');
   showEl('boardsView',    S.view==='boards');
   renderYRFIStrip(); // re-renders when game filter changes
-  if      (S.view==='cards')     renderCards();
-  else if (S.view==='heatmap')   renderHeatmap();
-  else if (S.view==='table')     renderTable();
+  if      (S.view==='overview')  renderOverview();
+  else if (S.view==='cards')     renderCards();
   else if (S.view==='charts')    renderCharts();
   else if (S.view==='edges')     renderEdges();
   else if (S.view==='dfs')       renderDFS();
@@ -4685,171 +4743,156 @@ Write the breakdown covering: (1) the top 1-2 pitching matchups and specific K p
 function showGuide() {
   const sections = [
     {
-      icon: '🚀',
-      title: 'Getting Started',
+      icon: '◎',
+      title: 'Overview — Start Here',
       color: 'var(--g)',
-      body: `<p>Waluigi's Forkball loads automatically each time you open it. Use the <b style="color:var(--t)">date picker</b> at the top or the <b style="color:var(--t)">← →</b> arrows to move between days. Click <b style="color:var(--t)">TODAY</b> to jump back to the current date. The app fetches the day's schedule, probable pitchers, stats, weather, individual player splits, and live betting odds — this usually takes 15–30 seconds.</p>
-<p style="margin-top:8px">The <b style="color:var(--y)">Stats Window</b> bar controls how much historical data feeds the calculations. <b>Last Month</b> is the default. Use <b>This Season</b> for larger sample sizes (best mid-April onward), or <b>Last 2 Weeks</b> for a hot-streak focus.</p>
-<p style="margin-top:8px"><b style="color:var(--pu)">AI Slate Breakdown</b> is now a manual trigger — click the <b>✦ Slate Breakdown</b> button when you want player enrichment notes. This keeps API costs predictable rather than running on every load.</p>`
+      body: `<p>The landing view. It answers one question: <b style="color:var(--t)">where should I look today?</b> Everything on it is a glance surface — nothing here is meant to be studied. Click anything to drill into the detail tab behind it.</p>
+<ul style="margin:8px 0 8px 18px;line-height:2">
+  <li><b style="color:var(--t)">Top Signals</b> — the tails of every module, filtered by <b>absolute</b> thresholds (K ≥ 72, TB ≥ 70, YRFI ≥ 60 or ≤ 33). If nothing qualifies, the block says so. It does not pad itself out to six cards on a flat slate. Fully deterministic — no AI credits.</li>
+  <li><b style="color:var(--t)">Strikeout Matchups</b> — scatter, one bubble per starter. Click to open the K Board with that pitcher highlighted.</li>
+  <li><b style="color:var(--t)">Total Bases</b> — ranked bars, one per lineup. Click to open TB Targets.</li>
+  <li><b style="color:var(--t)">Data note</b> at the bottom — always states what is missing or estimated right now.</li>
+</ul>
+<p style="margin-top:8px">The <b style="color:var(--bl)">YRFI strip</b> sits above the tabs and stays visible on every view, so it is on the Overview by default.</p>`
+    },
+    {
+      icon: '🚀',
+      title: 'Loading a Slate',
+      color: 'var(--y)',
+      body: `<p>Use the <b style="color:var(--t)">date picker</b> or the <b style="color:var(--t)">← →</b> arrows. <b style="color:var(--t)">TODAY</b> jumps back to the current date. The app fetches schedule, probable pitchers, stats, weather, splits, and live odds — usually 15–30 seconds.</p>
+<p style="margin-top:8px">The <b style="color:var(--y)">Stats Window</b> bar controls how much history feeds the calculations. <b>Last Month</b> is the default; <b>This Season</b> for bigger samples; <b>Last 2 Weeks</b> for hot streaks.</p>
+<p style="margin-top:8px"><b style="color:var(--pu)">AI Slate Breakdown</b> is manual-trigger only — click <b>✦ Slate Breakdown</b> when you want player enrichment notes. Nothing else in the app spends API credits.</p>`
+    },
+    {
+      icon: '⚠',
+      title: 'Confidence Badges — Read These First',
+      color: '#ff9f0a',
+      body: `<p>Every new surface uses one badge vocabulary. <b style="color:var(--t)">Silence means the data is real.</b> A badge always names the actual gap rather than hiding it:</p>
+<ul style="margin:8px 0 8px 18px;line-height:2.1">
+  <li><b style="color:#ff9f0a">⚠ thin</b> — the rate is mostly regressed prior, not observation. Small sample.</li>
+  <li><b style="color:#ff9f0a">⚠ est</b> — lineup not posted. Scores use a league-average 3L/5R/1S mix and <b>will move</b> when the real lineup drops.</li>
+  <li><b style="color:var(--t3)">no line</b> — no prop posted at the books yet. The model score still renders.</li>
+  <li><b style="color:var(--t3)">no L3</b> — last-3-starts game log missing, so the workload bonus is not applied.</li>
+</ul>
+<p style="margin-top:8px">An amber dot on a scatter bubble means one of the above applies to that pitcher. Empty blocks always state <i>why</i> they are empty — a blank block is a bug, not a slow load.</p>`
+    },
+    {
+      icon: '📐',
+      title: 'Calibration — Why Scores Mean Something',
+      color: 'var(--teal)',
+      body: `<p><b style="color:var(--t)">Absolute anchoring.</b> Scores map onto fixed league-wide bounds, not the slate's own min and max. Previously the best matchup of the day always scored 100 and the worst always scored 0 — which meant a garbage slate produced a confident-looking 100 on a mediocre matchup. Bounds now in use:</p>
+<ul style="margin:8px 0 8px 18px;line-height:2;font-family:var(--fm);font-size:12px">
+  <li>Pitcher K% axis: <b>14 → 34</b></li>
+  <li>Opponent lineup K% axis: <b>17 → 28</b></li>
+  <li>K composite raw: <b>33 → 66</b></li>
+  <li>TB raw score: <b>0.300 → 0.620</b></li>
+</ul>
+<p style="margin-top:8px"><b style="color:var(--t)">Shrinkage.</b> Low-sample rates are pulled toward the league mean so a pitcher two starts in with a fluky 38% K rate does not plot in the corner of the scatter and look like the play of the slate:</p>
+<p style="margin:6px 0 6px 18px;font-family:var(--fm);font-size:12px;color:var(--t2)">adjusted = (n × observed + k × prior) ÷ (n + k)</p>
+<p>where <b>k</b> is the stabilization point per stat — pitcher K% <b>70</b> BF, batter K% <b>60</b> PA, SLG <b>320</b> PA, ISO <b>160</b> PA. SLG stabilizes slowly, which is why <b style="color:var(--pu)">the TB model is genuinely weaker than the K model before roughly June</b>. The badges will tell you when that is biting.</p>
+<p style="margin-top:8px"><b style="color:var(--t)">Season-adaptive minimums.</b> While the app is still using last season's stats, the standard 50 PA / 20 IP gates apply. Once it flips to the current season in mid-April, samples reset and those gates would empty the boards for six weeks — so they scale down with games elapsed (floor 15 PA / 6 IP) and the Overview note tells you the current values.</p>`
     },
     {
       icon: '📍',
-      title: 'YRFI Strip (Top of Page)',
+      title: 'YRFI Strip',
       color: 'var(--bl)',
-      body: `<p>The colored strip below the controls is the <b style="color:var(--t)">YRFI dashboard</b> — Yes Run First Inning probability for every game on the slate. Each dot is a game, positioned along a <b style="color:#0a84ff">blue → </b><b style="color:#ffd60a">yellow → </b><b style="color:#ff453a">red</b> gradient.</p>
-<ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b style="color:#0a84ff">Blue (left)</b> — Low YRFI%. Strong NRFI lean.</li>
-  <li><b style="color:#ffd60a">Yellow (middle)</b> — Moderate. No strong edge either way.</li>
-  <li><b style="color:#ff453a">Red (right)</b> — High YRFI%. Strong YRFI lean.</li>
-</ul>
-<p>The model blends each team's recent 1st-inning scoring rate (60%) with the opposing starter's vulnerability via BB/9 and WHIP (40%). Hover any dot for the breakdown.</p>`
+      body: `<p>First-inning run likelihood for every game. Each dot is a game on a <b style="color:#0a84ff">blue → </b><b style="color:#ffd60a">yellow → </b><b style="color:#ff453a">red</b> gradient. Both tails are actionable; the middle is correctly ignorable.</p>
+<p style="margin:8px 0 6px;font-family:var(--fm);font-size:12px;color:var(--t2)">team 1st-inn scoring rate × 0.60 + opposing SP vulnerability × 0.40<br>
+game YRFI = 1 − (1 − away) × (1 − home)</p>
+<p>SP vulnerability uses <b>first-inning ERA</b> when at least 3 starts of linescore data exist, otherwise falls back to a BB/9 (60%) and WHIP (40%) proxy. Hover any dot for the breakdown and which of the two it used.</p>`
     },
     {
-      icon: '🎲',
-      title: 'Betting Mode',
-      color: 'var(--y)',
-      body: `<p>Switch to <b style="color:var(--y)">🎲 BETTING</b> mode in the top-right toggle. Built around five core prop types:</p>
+      icon: '⚡',
+      title: 'Strikeout Model',
+      color: 'var(--g)',
+      body: `<p>One K score in the app, shared by the Overview scatter and the K Board. There is deliberately no second, slightly-different K number anywhere.</p>
+<p style="margin:8px 0 6px;font-family:var(--fm);font-size:12px;color:var(--t2)">raw = pitcher_K%(hand-weighted) × 1.4 + opp_K%(vs hand) × 0.7 + workload<br>
+workload = max(0, IP_per_start − 5.0) × 1.5</p>
 <ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b style="color:var(--g)">Strikeout props</b> — high K Edge means the pitcher's K/9 + Chase% align with a high-K lineup. Best in <b>Big Board → K Edge</b> or <b>Pitcher Charts</b>.</li>
-  <li><b style="color:var(--o)">HR / Power props</b> — combines pitcher HR/9 + Hard Hit% allowed with opponent ISO + Barrel rate, adjusted for park and wind.</li>
-  <li><b style="color:var(--pu)">Total Bases props</b> — see the dedicated <b>🎯 TB Targets</b> tab. Most hand-adjusted prop type in the app.</li>
-  <li><b style="color:var(--bl)">YRFI / NRFI</b> — see the YRFI strip at the top of the page.</li>
-  <li><b style="color:var(--r)">Game totals & moneylines</b> — see the <b>Edge Rankings</b> tab for composite scoring.</li>
+  <li><b>Hand-weighted pitcher K%</b> — the pitcher's vsL and vsR K rates blended by the actual L/R composition of the lineup he faces, then shrunk by sample size.</li>
+  <li><b>Opponent K%</b> — that lineup's K rate specifically against this pitcher's throwing hand.</li>
+  <li><b>Workload</b> — deeper recent outings mean more K opportunity. Sourced from the last 3 starts. Never a penalty when missing; the score is just marked provisional.</li>
 </ul>
-<p><b style="color:var(--t)">Handedness is automatic.</b> Every stat — K%, SLG, ISO, wOBA — is already split by the pitcher's actual throwing hand vs the opposing lineup's bat side.</p>`
+<p style="margin-top:8px">On the scatter, <b>X</b> is the pitcher's K%, <b>Y</b> is the opponent's, and <b>color</b> is the composite. Top-right is the target zone. Both axes are absolute, so a bubble in the corner means the same thing today as it did last week.</p>`
     },
     {
-      icon: '🌍',
-      title: 'Big Board Tab',
-      color: 'var(--r)',
-      body: `<p>Full-slate cross-game heatmap — one row per starting pitcher. <b style="color:#7af">Blue cells = cold</b>, <b style="color:#f77">red cells = hot</b>. The <b>Heat score</b> on the right (0–100) averages across all columns in that mode.</p>
-<p style="margin-top:8px">Four mode buttons:</p>
+      icon: '🎯',
+      title: 'Total Bases Model',
+      color: 'var(--pu)',
+      body: `<p>Per-batter scoring, rolled up to lineup level on the Overview.</p>
+<p style="margin:8px 0 6px;font-family:var(--fm);font-size:12px;color:var(--t2)">score = batter_SLG(vs SP hand) × 0.45 + pitcher_SLG_allowed(vs batter hand) × 0.35<br>
+&nbsp;&nbsp;+ park + wind + temp + lineup_slot + away_bonus</p>
 <ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b style="color:var(--g)">⚡ K Edge</b> — K/9, Chase%, wOBA allowed, opponent K rate. Red = prime K prop target.</li>
-  <li><b style="color:var(--o)">💣 HR Edge</b> — HR/9, Barrel%, Hard Hit%, opponent ISO/SLG, park HR factor, wind. Red = power environment.</li>
-  <li><b style="color:var(--pu)">🟣 TB / SLG</b> — Opponent SLG/ISO/wOBA vs pitcher hand, HH%, park run factor, wRC+. Best for total bases and DFS stacks.</li>
-  <li><b style="color:var(--r)">📈 Run Env</b> — ERA, xFIP, GB%, opponent OPS/wRC+, park run factor, temperature. Red = over-friendly environment.</li>
+  <li><b>Park</b> — (HR factor − 100) × 0.003 + (run factor − 100) × 0.002</li>
+  <li><b>Wind</b> — blowing out +0.04, blowing in −0.03</li>
+  <li><b>Temp</b> — (°F − 65) × 0.0005, outdoor parks only</li>
+  <li><b>Lineup slot</b> — 1–2: +0.04 · 3–5: +0.02 · 6–7: 0 · 8–9: −0.02</li>
+  <li><b>Away bonus</b> — +0.015 for the extra 9th-inning plate appearance</li>
 </ul>
-<p>Click any row to open the full game detail view.</p>`
-    },
-    {
-      icon: '📊',
-      title: 'Table Tab',
-      color: 'var(--bl)',
-      body: `<p>Most information-dense view in the app. Every column is sortable — click any header. Key columns:</p>
-<ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b>K/9 vsL / K/9 vsR</b> — pitcher K rate against L or R hitters specifically.</li>
-  <li><b>Opp K% (hand-adj)</b> — opposing team's K rate vs this pitcher's specific hand.</li>
-  <li><b>Opp SLG / ISO (hand-adj)</b> — power vs this pitcher's hand.</li>
-  <li><b>TB Pot</b> — total bases potential, hand-adjusted. Purple = elevated.</li>
-  <li><b>⭐ Score</b> — composite edge score. Blends stats and odds via the Edges Odds Wt slider (note: the slider <b>only</b> affects this column and the Edge Rankings tab — every other tab is pure stats).</li>
-</ul>`
+<p style="margin-top:8px"><b style="color:var(--t)">Lineup rollup.</b> Each lineup's bar is the average of its top ${'' + 5} qualifying bats — averaged over <b>however many actually qualified</b>, not over a fixed 5. A lineup with only 3 qualifying bats gets a <b style="color:#ff9f0a">⚠ thin</b> badge rather than an artificially depressed score.</p>`
     },
     {
       icon: '📈',
-      title: 'Pitcher Charts Tab',
+      title: 'Pitcher Charts',
       color: 'var(--teal)',
-      body: `<p>Three scannable charts that overlay pitcher rates with opponent context as dots:</p>
+      body: `<p>Three charts overlaying pitcher rates with opponent context as dots:</p>
 <ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b>K/9 vs Opp K%</b> — pitcher K/9 bars overlaid with opponent K rate dots. Both high = strong K prop lean.</li>
-  <li><b>HR/9 vs Opp ISO</b> — same concept for power props.</li>
-  <li><b>Total Bases Potential</b> — grouped bars comparing away vs home TB potential across all games. Useful for stack-friendly games.</li>
+  <li><b>K/9 vs Opp K%</b> — both high means a strong K lean.</li>
+  <li><b>HR/9 vs Opp ISO</b> — same idea for power props.</li>
+  <li><b>Total Bases Potential</b> — grouped bars, away vs home, across the slate.</li>
 </ul>`
     },
     {
       icon: '⭐',
-      title: 'Edge Rankings Tab',
+      title: 'Edge Rankings',
       color: 'var(--y)',
-      body: `<p>Ranked composite scores blending all stat-based edges with optional market input. This is the only tab the <b>Edges Odds Wt</b> slider affects — it shifts the weight between pure model output and market consensus.</p>
+      body: `<p>Game-level composite blending every stat edge with optional market input. This is the <b>only</b> place the <b>Edges Odds Wt</b> slider does anything — every other view is pure model output.</p>
 <ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b>Slider at 0%</b> — pure stat-based ranking. Disagrees with the market often, which is the point.</li>
-  <li><b>Slider at 30–50%</b> — balanced view. Useful when you want sharp money to inform but not override your model.</li>
-  <li><b>Slider at 100%</b> — market-only ranking. Mostly a sanity check.</li>
+  <li><b>0%</b> — pure stats. Disagrees with the market often, which is the point.</li>
+  <li><b>30–50%</b> — sharp money informs but does not override.</li>
+  <li><b>100%</b> — market only. A sanity check, not a bet source.</li>
 </ul>
-<p>Composite scores are broken down by signal: K, HR, Over, Under, plus hand-adjusted variants. Badges flag the strongest individual signals per game.</p>`
+<p>Distinct from Top Signals: this ranks whole games on a composite; Top Signals surfaces individual extremes across modules.</p>`
     },
     {
-      icon: '🎯',
-      title: 'TB Targets Tab',
-      color: 'var(--pu)',
-      body: `<p>Dedicated total bases prop tab. Scores every batter on the slate using a 5-factor model:</p>
+      icon: '🎲',
+      title: 'Bet Boards & TB Targets (drill-downs)',
+      color: 'var(--o)',
+      body: `<p>These are <b>destinations</b>, not tabs you browse. You land on them by clicking something on the Overview.</p>
 <ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b>Batter SLG vs pitcher hand</b> (45%) — individual player splits when available.</li>
-  <li><b>Pitcher SLG-allowed vs batter hand</b> (35%) — flips advantage based on each batter.</li>
-  <li><b>Park HR / Run factors</b> + <b>weather</b> (wind direction, temperature).</li>
-  <li><b>Lineup position</b> — top of order = more PAs.</li>
-  <li><b>Away batter 9th-inning bonus</b> — extra plate appearance opportunity.</li>
+  <li><b>K Board</b> — click a scatter bubble or a K signal card. The pitcher you clicked is outlined.</li>
+  <li><b>TB Targets</b> — click a lineup bar or a TB signal card. Full per-batter board with top overs and under candidates.</li>
 </ul>
-<p>The <b>Top 15</b> section surfaces best over targets. The <b>Under targets</b> section finds batters with weak model scores who still have prop lines listed — strong under leans.</p>
-<p style="margin-top:8px"><b style="color:var(--t3)">Individual splits ✓</b> in the corner means real player-level split data loaded. Without it, the app falls back to team-level splits and league-average estimates.</p>`
+<p style="margin-top:8px">Both show the posted prop line next to the model score. <b style="color:var(--t)">The app does not yet compute a model-vs-line delta</b> — the model outputs a 0–100 score and the line is a strikeout or total-base count, which are different units. Comparing them is currently your eye's job. A projection layer that makes a true delta possible is the next phase.</p>`
     },
     {
       icon: '🔥',
-      title: 'Pitch Mash Tab',
-      color: 'var(--r)',
-      body: `<p>Identifies pitchers who lean heavily on one pitch type (above usage threshold), then ranks the opposing batters by how well they hit that exact pitch type from that handedness.</p>
-<p style="margin-top:8px">Composite score weighting per batter:</p>
-<ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b>wOBA vs pitch type</b> (30%)</li>
-  <li><b>SLG / xwOBA proxy</b> (25%)</li>
-  <li><b>Hard Hit %</b> (20%)</li>
-  <li><b>Barrel %</b> (15%)</li>
-  <li><b>K %</b> inverted (10%)</li>
-</ul>
-<p>Platoon advantages are flagged visually. When the MLB pitch arsenal endpoint returns nothing for a pitcher (common for openers, recent call-ups), the app falls back to a K-rate + GB% mix estimator.</p>`
+      title: 'Pitch Mash',
+      color: 'var(--pu)',
+      body: `<p>Finds batters who crush the specific pitch a starter throws most. Statcast-driven, no AI credits.</p>
+<p style="margin:8px 0 6px;font-family:var(--fm);font-size:12px;color:var(--t2)">wOBA 30% + xwOBA 25% + HH% 20% + Barrel% 15% + Whiff%(inverted) 10%</p>
+<p><b>PLAT</b> marks a platoon handedness advantage. Whiff% is inverted — lower is better for the batter.</p>`
     },
     {
       icon: '💰',
       title: 'DFS Mode',
       color: 'var(--pu)',
-      body: `<p>Switch to <b style="color:var(--pu)">💰 DFS</b> mode to activate the DFS tab. Uses <b style="color:var(--t)">DraftKings Classic MLB scoring</b>: 1B=3, 2B=5, 3B=8, HR=10, RBI=3.5, R=3, BB=3 for hitters; IP×2.25, K×2, ER×-2 for pitchers.</p>
-<p style="margin-top:8px"><b style="color:var(--t)">To load DK salaries:</b></p>
-<ol style="margin:8px 0 8px 18px;line-height:2">
-  <li>Go to <b>draftkings.com → Sports → MLB</b></li>
-  <li>Open a Classic contest → <b>Enter Contest</b></li>
-  <li>In the lineup builder, click <b>⬇ Export to CSV</b> (top-right of the player list)</li>
-  <li>Click <b>📂 Choose CSV File</b> in the DFS tab</li>
-</ol>
-<p>Once loaded, salaries appear in the table. <b>Value (pts/$1k)</b> is the best column for finding underpriced plays.</p>`
-    },
-    {
-      icon: '⚡',
-      title: 'Lineup Optimizer',
-      color: 'var(--pu)',
-      body: `<p>Top of the DFS tab. Fills a DK Classic lineup (2SP, C, 1B, 2B, 3B, SS, 3OF) under the $50,000 cap, maximizing projected DK points. <b>Salary data must be loaded first.</b></p>
-<p style="margin-top:8px">Three tilt sliders:</p>
-<ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b style="color:var(--pu)">SLG Matchup</b> — favor hitters with high SLG vs the opposing pitcher's hand. Good for TB-heavy slates and power stacks.</li>
-  <li><b style="color:var(--pu)">Weather</b> — boost hitters in wind-out / warm outdoor games, reward pitchers in domes / wind-in parks.</li>
-  <li><b style="color:var(--pu)">K Matchup (SP)</b> — favor pitchers facing high-K lineups.</li>
-</ul>
-<p>Click <b>⚡ Generate Optimal Lineup</b> after adjusting.</p>`
-    },
-    {
-      icon: '🔗',
-      title: 'Stack View & Game Filters',
-      color: 'var(--o)',
-      body: `<p>Bottom of the DFS tab — <b>Top Stacks</b> scores team stacking opportunities. Combines the top 5 hitters' SLG vs opposing pitcher hand, pitcher FIP, park HR factor, and weather.</p>
-<p style="margin-top:8px">The <b>Game Filter bar</b> (above the main content) lets you click any game chip to include or exclude it from <b>all</b> views simultaneously — Big Board, Table, Charts, Edges, TB Targets, Pitch Mash, DFS. Useful for focusing on a subset or excluding a postponement.</p>`
+      body: `<p>Switch modes in the top-right toggle, then upload a DK salary CSV. Sort by <b>Value (pts/$1k)</b> to find underpriced plays.</p>
+<p style="margin-top:8px">The optimizer fills a DK Classic lineup (2SP, C, 1B, 2B, 3B, SS, 3OF) under $50,000. Three tilt sliders — <b>SLG Matchup</b>, <b>Weather</b>, <b>K Matchup</b> — shift the projection toward your read on the slate. <b>Top Stacks</b> at the bottom scores team stacking opportunities.</p>`
     },
     {
       icon: '🎮',
-      title: 'Workflow Tips',
-      color: 'var(--teal)',
-      body: `<p><b style="color:var(--t)">Recommended daily workflow (Betting):</b></p>
-<ol style="margin:8px 0 8px 18px;line-height:2.2">
-  <li>Load today's slate. Wait for the YRFI strip and tabs to populate (~15–30s).</li>
-  <li>Scan the <b>YRFI strip</b> for early YRFI/NRFI plays.</li>
-  <li>Open <b>Matchup Cards</b> for a slate-wide first read.</li>
-  <li>Switch to <b>🌍 Big Board → K Edge</b> for top K prop targets, then <b>💣 HR Edge</b> and <b>🟣 TB/SLG</b>.</li>
-  <li>Use <b>📊 Table</b> to drill into specific stats with sorting.</li>
-  <li>Cross-check with <b>📈 Pitcher Charts</b> for K props and <b>⭐ Edge Rankings</b> for composite confirmation.</li>
-  <li>Open <b>🎯 TB Targets</b> for individual batter TB plays.</li>
-  <li>Check <b>🔥 Pitch Mash</b> for one-pitch-heavy pitchers facing batters who crush that pitch.</li>
-  <li>(Optional) Click <b>✦ Slate Breakdown</b> for AI player notes.</li>
+      title: 'Daily Workflow',
+      color: 'var(--g)',
+      body: `<ol style="margin:8px 0 8px 18px;line-height:2.2">
+  <li>Load the slate. Read the <b>Overview</b> data note first — it tells you what is missing.</li>
+  <li>Scan <b>Top Signals</b>. If it is empty, that is a real answer; the slate is flat.</li>
+  <li>Check the <b>K scatter</b> top-right corner and the top of the <b>TB bars</b>.</li>
+  <li>Click into the drill-downs for anything worth a second look.</li>
+  <li>Cross-check with <b>Edge Rankings</b> and <b>Pitch Mash</b>.</li>
+  <li>Re-check closer to first pitch — anything badged <b style="color:#ff9f0a">⚠ est</b> will move when lineups post.</li>
 </ol>
-<p style="margin-top:8px"><b style="color:var(--t)">DFS workflow:</b> Switch to DFS mode → upload DK CSV → sort by Value (Pts/$) → adjust optimizer sliders to match your slate thesis → generate lineup.</p>
-<p style="margin-top:8px"><b style="color:var(--y)">Pro tip:</b> The <b>Edges Odds Wt</b> slider <b>only affects the Edge Rankings tab and the ⭐ Score column in Table</b>. Every other tab — YRFI strip, Big Board, Pitcher Charts, TB Targets, Pitch Mash, DFS — is pure stat-based with no market input.</p>`
+<p style="margin-top:8px"><b style="color:var(--y)">Known limits, stated plainly:</b> bullpen numbers are a crude proxy (team pitching scaled by a fixed 0.45) and cannot distinguish a good bullpen from a good rotation — do not bet off them. There is no first-5-innings market support yet. Neither is fixed in this build.</p>`
     },
   ];
 
@@ -4863,6 +4906,106 @@ function showGuide() {
 </div>`).join('');
 
   document.getElementById('guideModal').style.display = 'block';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ─── CALIBRATION LAYER ─────────────────────────────────────────
+// Absolute anchors, sample-size shrinkage, season-adaptive minimums,
+// and the shared confidence-badge vocabulary. Everything the Overview
+// renders passes through here first.
+// ═══════════════════════════════════════════════════════════════
+
+// League-wide ABSOLUTE bounds. Scores map onto these instead of the slate's
+// own min/max, so a weak slate correctly renders as a page full of nothing
+// rather than promoting its least-bad matchup to 100.
+const ANCHOR = {
+  pK:    { lo: 14.0,  hi: 34.0  },  // SP K% vs hand
+  oppK:  { lo: 17.0,  hi: 28.0  },  // opposing lineup K% vs hand
+  kRaw:  { lo: 33.0,  hi: 66.0  },  // sKBoard raw composite units
+  tbRaw: { lo: 0.300, hi: 0.620 },  // scoreTBTargets raw score units
+};
+function anchorPct(v, a) {
+  const n = parseFloat(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(Math.max(0, Math.min(1, (n - a.lo) / (a.hi - a.lo))) * 100);
+}
+// Position along an anchor axis as 0..1 (for plotting, not display)
+function anchorFrac(v, a) {
+  const n = parseFloat(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(1, (n - a.lo) / (a.hi - a.lo)));
+}
+
+// ─── SHRINKAGE ───
+// Stabilization points — roughly the sample size at which a rate stops being
+// mostly noise. SLG and ISO are the slow ones, which is exactly why the TB
+// model is the most fragile thing in the app before about June.
+const STABILIZE  = { pK: 70,   bK: 60,   slg: 320,   iso: 160,   ops: 300   };
+const LEAGUE_MEAN= { pK: 22.3, bK: 22.3, slg: 0.405, iso: 0.160, ops: 0.715 };
+
+// PLUGGABLE PRIOR SLOT.
+// Phase 1: `prior` is left null and the league mean is used.
+// Phase 1.5: pass the player's own prior-season value here — a hitter who
+// slugged .520 last year should regress toward .520, not toward .405.
+// Nothing else about this function needs to change when that lands.
+function shrink(observed, sample, stat, prior = null) {
+  const k    = STABILIZE[stat];
+  const p    = parseFloat(prior);
+  const mean = Number.isFinite(p) ? p : LEAGUE_MEAN[stat];
+  const obs  = parseFloat(observed);
+  if (k == null) return { value: Number.isFinite(obs) ? obs : mean, w: 1, thin: false };
+  if (!Number.isFinite(obs)) return { value: mean, w: 0, thin: true };
+  const n = Number.isFinite(parseFloat(sample)) ? parseFloat(sample) : 0;
+  const w = n / (n + k);
+  return { value: obs * w + mean * (1 - w), w, thin: w < 0.55 };
+}
+
+// ─── SEASON-ADAPTIVE MINIMUMS ───
+// Fraction of the regular season elapsed (Opening Day ≈ Mar 27, end ≈ Sep 28).
+function seasonProgress(dateStr) {
+  const d   = dateStr || todayISO();
+  const yr  = parseInt(d.slice(0, 4));
+  const st  = new Date(yr + '-03-27T00:00:00').getTime();
+  const en  = new Date(yr + '-09-28T00:00:00').getTime();
+  const cur = new Date(d + 'T12:00:00').getTime();
+  if (!Number.isFinite(cur)) return 1;
+  return Math.max(0, Math.min(1, (cur - st) / (en - st)));
+}
+
+// While activeStatsSeason() still points at LAST year, everyone has a full
+// season banked and the standard gates apply. Once it flips to the current
+// season (mid-April), samples reset to near-zero and the fixed 50 PA / 20 IP
+// gates empty the boards out for roughly six weeks. Scale by games elapsed.
+const MIN_FULL = { batterPA: 50, pitcherIP: 20 };
+function adaptiveMins(dateStr) {
+  const d = dateStr || S.date || todayISO();
+  const usingPrior = parseInt(activeStatsSeason(d)) < parseInt(d.slice(0, 4));
+  if (usingPrior) return { ...MIN_FULL, scaled: false, progress: 1 };
+  const p = seasonProgress(d);
+  // Target ≈ half of what a regular would have accumulated by this date.
+  const batterPA  = Math.max(15, Math.min(MIN_FULL.batterPA,  Math.round(650 * p * 0.5)));
+  const pitcherIP = Math.max(6,  Math.min(MIN_FULL.pitcherIP, Math.round(180 * p * 0.5)));
+  return { batterPA, pitcherIP, scaled: batterPA < MIN_FULL.batterPA, progress: p };
+}
+
+// ─── CONFIDENCE BADGES ───
+// One vocabulary across every new surface. 'ok' renders nothing — silence
+// means the data is real. Everything else names the actual gap.
+const CONF = {
+  thin:   { col: '#ff9f0a',   txt: '⚠ thin'    },
+  est:    { col: '#ff9f0a',   txt: '⚠ est'     },
+  noline: { col: 'var(--t3)', txt: 'no line'   },
+  nol3:   { col: 'var(--t3)', txt: 'no L3'     },
+};
+function confBadge(level, reason) {
+  if (!level || level === 'ok') return '';
+  const m = CONF[level];
+  if (!m) return '';
+  return `<span class="conf-b" style="color:${m.col};border-color:${m.col}55" title="${(reason || '').replace(/"/g, '&quot;')}">${m.txt}</span>`;
+}
+// Empty state that always names the cause — never a blank block.
+function emptyBlock(msg, detail) {
+  return `<div class="ov-empty"><div class="ov-empty-t">${msg}</div>${detail ? `<div class="ov-empty-d">${detail}</div>` : ''}</div>`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -4910,6 +5053,10 @@ async function fetchTBSplits() {
 
 function scoreTBTargets() {
   const targets = [];
+  // Season-adaptive sample gates — the fixed 50 PA / 20 IP thresholds empty this
+  // board out for roughly six weeks after activeStatsSeason() flips to the
+  // current year. See adaptiveMins().
+  const MINS = adaptiveMins(S.date);
 
   // Build a flat prop lookup: normalized name → { line, overPrice, underPrice }
   const propLookup = {};
@@ -4938,7 +5085,7 @@ function scoreTBTargets() {
       // Only applies when sp.ip is populated (post fetchPStat). Openers, spot starters,
       // and early-season SP with tiny samples are excluded — their SLG-allowed numbers
       // are unreliable and skew the matchup score.
-      if (oppSP?.ip != null && oppSP.ip < 20) continue;
+      if (oppSP?.ip != null && oppSP.ip < MINS.pitcherIP) continue;
 
       for (const b of lu) {
         if (!b.name) continue;
@@ -4947,7 +5094,7 @@ function scoreTBTargets() {
         // b.pa is set for roster-estimate batters (from fetchRosterEstimate) but is null
         // for confirmed-lineup batters (confirmed starters are presumed established).
         // This specifically targets the bench/fringe players that sneak in via roster estimates.
-        if (b.pa != null && b.pa < 50) continue;
+        if (b.pa != null && b.pa < MINS.batterPA) continue;
 
         const bHand = b.hand || 'R';
 
@@ -4977,7 +5124,7 @@ function scoreTBTargets() {
         const prop = propLookup[normName(b.name)] || null;
 
         targets.push({
-          name: b.name, team: myTeam, oppTeam, isAway,
+          name: b.name, team: myTeam, oppTeam, isAway, gameId: g.game_id,
           hand: bHand, ord: b.ord,
           oppSPName: oppSP?.name || 'TBD', spHand,
           batterSLG: batterSLGvsSP, pitcherSLG: pitcherSLGvsBatter,
@@ -4993,11 +5140,10 @@ function scoreTBTargets() {
     }
   }
 
-  // Normalize scores to 0-100
-  const scores = targets.map(t => t.score);
-  const min = Math.min(...scores), max = Math.max(...scores);
-  const range = max - min || 1;
-  targets.forEach(t => { t.pct = Math.round(((t.score - min) / range) * 100); });
+  // Map onto FIXED league bounds (ANCHOR.tbRaw), not the slate's own min/max —
+  // same reasoning as normalizeKScores. Slate-relative scaling guaranteed a 100
+  // and a 0 every single day regardless of whether the slate had anything on it.
+  targets.forEach(t => { t.pct = anchorPct(t.score, ANCHOR.tbRaw) ?? 0; });
 
   const sorted = targets.sort((a, b) => b.score - a.score);
 
@@ -5016,7 +5162,7 @@ function scoreTBTargets() {
     })
     .slice(0, 8);
 
-  return { top, low };
+  return { top, low, all: sorted, mins: MINS };
 }
 
 function renderTB() {
@@ -5548,7 +5694,15 @@ function sKBoard(pitcher, oppTeam, oppLineup, l3) {
 
   const pK_vsL = pitcher.vsL?.k_pct ?? pitcher.k_pct ?? 22;
   const pK_vsR = pitcher.vsR?.k_pct ?? pitcher.k_pct ?? 22;
-  const pK_weighted = (pK_vsL * lWeight) + (pK_vsR * rWeight);
+  const pK_raw = (pK_vsL * lWeight) + (pK_vsR * rWeight);
+
+  // Shrink toward league mean by sample size. A pitcher two starts into the year
+  // with a fluky 38% K rate would otherwise plot in the far corner of an
+  // absolutely-anchored scatter and look like the play of the slate.
+  // Batters faced ≈ IP × 4.2.
+  const bfSample = Number.isFinite(parseFloat(pitcher.ip)) ? parseFloat(pitcher.ip) * 4.2 : 0;
+  const pShr = shrink(pK_raw, bfSample, 'pK');
+  const pK_weighted = pShr.value;
 
   // Opp team's K% specifically vs this pitcher's hand
   const oppKey = pHand === 'L' ? 'vsLHP' : 'vsRHP';
@@ -5567,17 +5721,19 @@ function sKBoard(pitcher, oppTeam, oppLineup, l3) {
     workloadBonus,
     mix,
     hasL3: l3 != null,
+    thin: pShr.thin,        // rate is mostly prior, not observation
+    sampleW: R(pShr.w, 2),  // 0 = all prior, 1 = all observed
   };
 }
 
 // Normalize raw scores to 0-100 across the slate so the gradient bar always uses full range.
+// Map raw composite onto FIXED league bounds (ANCHOR.kRaw), not the slate's own
+// min/max. Slate-relative normalization made the best matchup on a garbage slate
+// render as 100 — a confident display of nothing. Absolute anchoring means a weak
+// slate correctly looks weak.
 function normalizeKScores(rows) {
-  if (!rows.length) return rows;
-  const raws = rows.map(r => r.score.raw);
-  const lo = Math.min(...raws), hi = Math.max(...raws);
-  const span = hi - lo || 1;
   for (const r of rows) {
-    r.score.pct = Math.round(((r.score.raw - lo) / span) * 100);
+    r.score.pct = anchorPct(r.score.raw, ANCHOR.kRaw) ?? 0;
   }
   return rows;
 }
@@ -5668,6 +5824,7 @@ function buildKBoardRows() {
 
 function mkKRow(r, rank) {
   const sp = r.sp;
+  const isHL = S._highlight != null && r.spId === S._highlight;
   const hand = sp.hand || '?';
   const handColor = hand === 'L' ? 'var(--r)' : hand === 'R' ? 'var(--bl)' : 'var(--t3)';
   const barColor = kBoardGradientColor(r.score.pct);
@@ -5709,7 +5866,7 @@ function mkKRow(r, rank) {
     ? `<span title="Lineup not posted yet — using league-average mix">⚠️ est. lineup</span>`
     : `${mix.lhb}L/${mix.rhb}R${mix.sw ? '/' + mix.sw + 'S' : ''}`;
 
-  return `<div class="kbrow" data-gid="${r.gameId}" style="background:var(--c2);border:0.5px solid var(--b1);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:grid;grid-template-columns:38px 2.2fr 3fr 110px;gap:14px;align-items:center;cursor:pointer;transition:border-color .15s">
+  return `<div class="kbrow${isHL?' hl-row':''}" data-gid="${r.gameId}" style="background:var(--c2);border:0.5px solid var(--b1);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:grid;grid-template-columns:38px 2.2fr 3fr 110px;gap:14px;align-items:center;cursor:pointer;transition:border-color .15s">
     <div style="font-size:18px;font-weight:600;color:var(--t3);text-align:center">${rank}</div>
     <div>
       <div style="font-size:15px;font-weight:500;color:var(--t)">${sp.name} <span style="display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;background:rgba(255,255,255,.06);color:${handColor};margin-left:4px">${hand}HP</span></div>
@@ -5843,6 +6000,326 @@ function mkTBBoardRow(t, rank) {
       </div>
     </div>
   </div>`;
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// ─── OVERVIEW (landing view) ───────────────────────────────────
+// Glance-first surface. Three blocks: Top Signals (tails of every
+// module), K Scatter (absolute axes), TB Lineup bars. Nothing here
+// is meant to be studied — everything drills into a detail tab.
+// ═══════════════════════════════════════════════════════════════
+
+// Jump to a detail tab, optionally pre-selecting a board and highlighting a row.
+function drillTo(view, opts) {
+  S.view = view;
+  document.querySelectorAll('.vt').forEach(x => x.classList.toggle('on', x.dataset.v === view));
+  if (opts && opts.bbSub) BB.sub = opts.bbSub;
+  S._highlight = (opts && opts.highlight) || null;
+  renderView();
+  const main = document.querySelector('.main');
+  if (main && typeof main.scrollIntoView === 'function') {
+    try { main.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+  }
+}
+
+// ─── TB LINEUP AGGREGATION ───
+// Rolls individual TB targets up to one row per lineup. Critically, the average
+// is taken over however many bats actually qualified — NOT over a fixed 5 — so a
+// thin lineup isn't artificially depressed into looking like a bad environment.
+// It gets flagged instead.
+const TB_CORE = 5;
+function buildTBLineups() {
+  const res = scoreTBTargets();
+  const all = res.all || [];
+  const groups = {};
+  for (const t of all) {
+    const key = t.team + '|' + t.oppTeam;
+    if (!groups[key]) groups[key] = {
+      team: t.team, oppTeam: t.oppTeam, oppSPName: t.oppSPName,
+      spHand: t.spHand, venueName: t.venueName, isAway: t.isAway,
+      gameId: t.gameId, bats: [],
+    };
+    groups[key].bats.push(t);
+  }
+  const rows = Object.values(groups).map(gp => {
+    gp.bats.sort((a, b) => b.score - a.score);
+    const core   = gp.bats.slice(0, TB_CORE);
+    const avgRaw = core.reduce((s, b) => s + b.score, 0) / (core.length || 1);
+    return Object.assign(gp, {
+      core,
+      qualified: gp.bats.length,
+      raw: avgRaw,
+      pct: anchorPct(avgRaw, ANCHOR.tbRaw) ?? 0,
+      thin: gp.bats.length < TB_CORE,
+      est:  core.some(b => b.estimated),
+    });
+  });
+  rows.sort((a, b) => b.raw - a.raw);
+  return { rows, mins: res.mins };
+}
+
+// ─── TOP SIGNALS ───
+// Absolute thresholds, not top-N. A slate with nothing on it returns an empty
+// array and says so, rather than manufacturing six confident cards.
+const SIG_THRESH = { k: 72, tb: 70, yrfiHi: 60, yrfiLo: 33 };
+const SIG_MAX = 6;
+
+function buildTopSignals(kRows, tbRows) {
+  const sigs = [];
+
+  // K props — pitcher side
+  for (const r of (kRows || [])) {
+    if (r.score.pct < SIG_THRESH.k) continue;
+    const line = r.prop && r.prop.line != null ? `o${r.prop.line}` : null;
+    sigs.push({
+      kind: 'K', col: 'var(--g)', icon: '⚡',
+      title: (r.sp.name || 'TBD'),
+      sub: `vs ${r.oppAbbr}`,
+      why: `${r.score.pK_weighted.toFixed(1)}% K vs ${r.oppAbbr} ${r.score.oK.toFixed(1)}% team K`
+         + (line ? ` · line ${line}` : ''),
+      pct: r.score.pct,
+      badge: !r.score.hasL3 ? confBadge('nol3', 'No last-3-starts log — workload bonus not applied')
+           : r.score.mix.estimated ? confBadge('est', 'Lineup not posted — league-average L/R mix')
+           : (!line ? confBadge('noline', 'No K prop posted yet') : ''),
+      go: () => drillTo('boards', { bbSub: 'k', highlight: r.spId }),
+    });
+  }
+
+  // TB — lineup side
+  for (const r of (tbRows || [])) {
+    if (r.pct < SIG_THRESH.tb) continue;
+    sigs.push({
+      kind: 'TB', col: 'var(--pu)', icon: '🎯',
+      title: `${r.team} lineup`,
+      sub: `vs ${r.oppSPName} (${r.spHand})`,
+      why: `Top ${r.core.length} bats avg ${r.raw.toFixed(3)} · ${r.venueName || ''}`,
+      pct: r.pct,
+      badge: r.thin ? confBadge('thin', `Only ${r.qualified} bats clear the sample minimum`)
+           : r.est  ? confBadge('est', 'Lineup not posted — roster estimate')
+           : '',
+      go: () => drillTo('tb'),
+    });
+  }
+
+  // YRFI / NRFI — both tails are actionable
+  for (const g of filteredGames()) {
+    if (!g.yrfi) continue;
+    const p = g.yrfi.pct;
+    if (p >= SIG_THRESH.yrfiHi) {
+      sigs.push({
+        kind: 'YRFI', col: '#ff453a', icon: '🔥',
+        title: `${g.away} @ ${g.home}`, sub: 'YRFI lean',
+        why: `${p}% · ${g.away} ${g.yrfi.awayPct}% / ${g.home} ${g.yrfi.homePct}%`,
+        pct: p,
+        badge: (g.yrfi.awayFromData || g.yrfi.homeFromData) ? '' : confBadge('thin', 'No linescore data — SP stats proxy only'),
+        go: () => showDetail(g.game_id),
+      });
+    } else if (p <= SIG_THRESH.yrfiLo) {
+      sigs.push({
+        kind: 'NRFI', col: '#0a84ff', icon: '🧊',
+        title: `${g.away} @ ${g.home}`, sub: 'NRFI lean',
+        why: `${p}% YRFI · ${g.away} ${g.yrfi.awayPct}% / ${g.home} ${g.yrfi.homePct}%`,
+        pct: 100 - p,
+        badge: (g.yrfi.awayFromData || g.yrfi.homeFromData) ? '' : confBadge('thin', 'No linescore data — SP stats proxy only'),
+        go: () => showDetail(g.game_id),
+      });
+    }
+  }
+
+  sigs.sort((a, b) => b.pct - a.pct);
+  return sigs.slice(0, SIG_MAX);
+}
+
+// ─── K SCATTER ───
+// Two-variable question, so a strip would flatten it. X = pitcher K% vs the
+// lineup's hand mix, Y = that lineup's K% vs the pitcher's hand. Top-right is
+// the target zone. Both axes are ABSOLUTE — a bubble's position means the same
+// thing today as it did last Tuesday.
+function renderKScatter(rows) {
+  if (!rows || !rows.length) {
+    return emptyBlock('No starters to plot', 'Probable pitchers have not been posted for this slate.');
+  }
+  const W = 720, H = 360, PL = 54, PR = 16, PT = 16, PB = 44;
+  const plotW = W - PL - PR, plotH = H - PT - PB;
+
+  const x = v => PL + (anchorFrac(v, ANCHOR.pK)   ?? 0) * plotW;
+  const y = v => PT + (1 - (anchorFrac(v, ANCHOR.oppK) ?? 0)) * plotH;
+
+  // Gridlines at absolute values so the scale is legible day to day
+  const xTicks = [15, 20, 25, 30, 34];
+  const yTicks = [18, 21, 24, 27];
+
+  const grid = xTicks.map(t => `
+    <line x1="${x(t)}" y1="${PT}" x2="${x(t)}" y2="${PT + plotH}" stroke="var(--b1)" stroke-width="1" opacity=".5"/>
+    <text x="${x(t)}" y="${PT + plotH + 18}" fill="var(--t3)" font-size="10" text-anchor="middle" font-family="var(--fm)">${t}%</text>
+  `).join('') + yTicks.map(t => `
+    <line x1="${PL}" y1="${y(t)}" x2="${PL + plotW}" y2="${y(t)}" stroke="var(--b1)" stroke-width="1" opacity=".5"/>
+    <text x="${PL - 8}" y="${y(t) + 3}" fill="var(--t3)" font-size="10" text-anchor="end" font-family="var(--fm)">${t}%</text>
+  `).join('');
+
+  // Target zone — upper-right quadrant, drawn from absolute thresholds
+  const zx = x(26), zy = y(25.5);
+  const zone = `<rect x="${zx}" y="${PT}" width="${PL + plotW - zx}" height="${zy - PT}"
+      fill="var(--g)" opacity=".07"/>
+    <text x="${PL + plotW - 8}" y="${PT + 16}" fill="var(--g)" font-size="10" text-anchor="end"
+      font-family="var(--fm)" opacity=".8" letter-spacing="1">TARGET ZONE</text>`;
+
+  const dots = rows.map(r => {
+    const cx = x(r.score.pK_weighted), cy = y(r.score.oK);
+    const col = kBoardGradientColor(r.score.pct);
+    const last = (r.sp.name || 'TBD').split(' ').pop();
+    const showLbl = r.score.pct >= 55;
+    const flag = !r.score.hasL3 || r.score.mix.estimated;
+    const line = r.prop && r.prop.line != null ? `o${r.prop.line}` : 'no line';
+    return `<g class="ks-dot" data-gid="${r.gameId}" data-spid="${r.spId}">
+      <circle cx="${cx}" cy="${cy}" r="7" fill="${col}" stroke="var(--bg)" stroke-width="2"/>
+      ${flag ? `<circle cx="${cx + 7}" cy="${cy - 7}" r="3" fill="#ff9f0a" stroke="var(--bg)" stroke-width="1.5"/>` : ''}
+      ${showLbl ? `<text x="${cx}" y="${cy - 13}" fill="${col}" font-size="9" font-weight="700"
+         text-anchor="middle" font-family="var(--fb)">${last}</text>` : ''}
+      <title>${r.sp.name} (${r.sp.hand}) vs ${r.oppAbbr}
+K% ${r.score.pK_weighted.toFixed(1)} · Opp K% ${r.score.oK.toFixed(1)}
+Composite ${r.score.pct} · Prop ${line}${flag ? '\n⚠ ' + (!r.score.hasL3 ? 'no L3 workload data' : 'lineup not posted') : ''}</title>
+    </g>`;
+  }).join('');
+
+  return `<div class="ov-chart-wrap">
+    <svg viewBox="0 0 ${W} ${H}" class="ks-svg" preserveAspectRatio="xMidYMid meet">
+      ${zone}${grid}
+      <text x="${PL + plotW / 2}" y="${H - 6}" fill="var(--t3)" font-size="10" text-anchor="middle"
+        font-family="var(--fb)" letter-spacing=".5">PITCHER K% (vs lineup hand mix)</text>
+      <text x="14" y="${PT + plotH / 2}" fill="var(--t3)" font-size="10" text-anchor="middle"
+        font-family="var(--fb)" letter-spacing=".5" transform="rotate(-90 14 ${PT + plotH / 2})">OPPONENT LINEUP K%</text>
+      ${dots}
+    </svg>
+  </div>`;
+}
+
+// ─── TB LINEUP BARS ───
+function renderTBBars(rows, mins) {
+  if (!rows || !rows.length) {
+    return emptyBlock('No qualifying lineups', 'Split data has not loaded, or no batters clear the sample minimum yet.');
+  }
+  const shown = rows.slice(0, 8);
+  const body = shown.map(r => {
+    const col = kBoardGradientColor(r.pct);
+    const badge = r.thin ? confBadge('thin', `Only ${r.qualified} bats clear the ${mins ? mins.batterPA : 50} PA minimum`)
+                : r.est  ? confBadge('est', 'Lineup not posted — roster estimate')
+                : '';
+    return `<div class="tbl-row" data-gid="${r.gameId || ''}">
+      <div class="tbl-team">${r.team}${r.isAway ? '' : '<span class="tbl-h">H</span>'}</div>
+      <div class="tbl-mid">
+        <div class="tbl-meta">vs ${r.oppSPName} <span class="tbl-hand ${r.spHand === 'L' ? 'hl' : 'hr'}">${r.spHand}</span> ${badge}</div>
+        <div class="tbl-track"><div class="tbl-fill" style="width:${r.pct}%;background:${col}"></div></div>
+      </div>
+      <div class="tbl-pct" style="color:${col}">${r.pct}</div>
+    </div>`;
+  }).join('');
+  const more = rows.length > 8
+    ? `<div class="ov-more">${rows.length - 8} more lineups — open TB Targets for the full board</div>` : '';
+  return body + more;
+}
+
+// ─── ORCHESTRATOR ───
+function renderOverview() {
+  const el = document.getElementById('overviewView');
+  if (!el) return;
+
+  const gs = filteredGames();
+  if (!gs.length) {
+    el.innerHTML = emptyBlock('No games on this slate', 'Try another date, or check the game filter above.');
+    return;
+  }
+
+  // K rows reuse the exact K Board model — no second K score in the app.
+  let kRows = [];
+  try { kRows = buildKBoardRows(); } catch (e) { console.warn('Overview K rows failed:', e.message); }
+
+  let tb = { rows: [], mins: null };
+  if (S.tbSplits.loaded || S.tbSplits.loading) {
+    try { tb = buildTBLineups(); } catch (e) { console.warn('Overview TB rows failed:', e.message); }
+  }
+
+  const sigs = buildTopSignals(kRows, tb.rows);
+
+  // Kick off the L3 fetch if it hasn't run — the overview needs it too.
+  if (!BB.l3Loaded && !BB.l3Loading && gs.length) {
+    fetchL3Logs().then(() => { if (S.view === 'overview') renderOverview(); });
+  }
+
+  // ── Top Signals ──
+  const sigBody = sigs.length
+    ? `<div class="sig-grid">` + sigs.map((s, i) => `
+        <div class="sig-card" data-si="${i}" style="border-left-color:${s.col}">
+          <div class="sig-top">
+            <span class="sig-kind" style="color:${s.col}">${s.icon} ${s.kind}</span>
+            <span class="sig-pct" style="color:${s.col}">${s.pct}</span>
+          </div>
+          <div class="sig-title">${s.title}</div>
+          <div class="sig-sub">${s.sub} ${s.badge}</div>
+          <div class="sig-why">${s.why}</div>
+        </div>`).join('') + `</div>`
+    : emptyBlock('Nothing clears the bar today',
+        `No matchup reaches the absolute thresholds (K ${SIG_THRESH.k}, TB ${SIG_THRESH.tb}, YRFI ${SIG_THRESH.yrfiHi}/${SIG_THRESH.yrfiLo}). That is a real answer, not a loading state — this slate is flat.`);
+
+  // ── Data-state banner ──
+  const notes = [];
+  const estCount = kRows.filter(r => r.score.mix.estimated).length;
+  if (estCount) notes.push(`<b style="color:#ff9f0a">${estCount}/${kRows.length}</b> lineups not posted — those K scores use a league-average L/R mix and will move when lineups drop`);
+  if (BB.l3Loaded) {
+    const noL3 = kRows.filter(r => !r.score.hasL3).length;
+    if (noL3 === kRows.length && kRows.length) {
+      notes.push(`<b style="color:#ff9f0a">No L3 game logs returned for any pitcher</b> — check that the Worker handles the <code>pitcher-gamelog</code> action. Workload bonus is off.`);
+    } else if (noL3) {
+      notes.push(`${noL3}/${kRows.length} pitchers missing L3 logs — workload bonus not applied to those`);
+    }
+  } else {
+    notes.push(`Loading last-3-start logs — K scores are provisional until this finishes`);
+  }
+  if (tb.mins && tb.mins.scaled) {
+    notes.push(`Early season: sample minimums scaled to <b>${tb.mins.batterPA} PA / ${tb.mins.pitcherIP} IP</b> (full-season gates are 50/20). Low-sample rates are regressed toward league mean.`);
+  }
+  if (!S.oddsOk) notes.push(`Odds unavailable — prop lines not shown`);
+  const banner = notes.length
+    ? `<div class="ov-note">${notes.map(n => `<div>· ${n}</div>`).join('')}</div>` : '';
+
+  el.innerHTML = `
+    <div class="ov-sec">
+      <div class="ov-h"><span class="ov-h-t">TOP SIGNALS</span>
+        ${infoIcon('computed', 'Tails of every module on the slate, filtered by <b>absolute</b> thresholds rather than top-N. If nothing qualifies, this block is empty on purpose. Fully deterministic — no AI credits are used.')}
+        <span class="ov-h-n">${sigs.length ? sigs.length + ' qualifying' : 'none qualifying'}</span>
+      </div>
+      ${sigBody}
+    </div>
+
+    <div class="ov-sec">
+      <div class="ov-h"><span class="ov-h-t">STRIKEOUT MATCHUPS</span>
+        ${infoIcon('computed', 'X = pitcher K% weighted by the opposing lineup\'s L/R composition. Y = that lineup\'s K% vs this pitcher\'s hand. Bubble color = K Board composite (<code>pK%×1.4 + oppK%×0.7 + workload</code>) mapped to <b>fixed league bounds</b>, not the slate\'s own range. Amber dot = missing L3 logs or unposted lineup.')}
+        <span class="ov-h-n">${kRows.length} starters</span>
+      </div>
+      ${renderKScatter(kRows)}
+    </div>
+
+    <div class="ov-sec">
+      <div class="ov-h"><span class="ov-h-t">TOTAL BASES — LINEUP ENVIRONMENTS</span>
+        ${infoIcon('computed', 'One row per lineup. Score is the average of that lineup\'s top ' + TB_CORE + ' qualifying bats from the TB Targets model, averaged over <b>however many actually qualified</b> so thin lineups are flagged rather than silently depressed. Mapped to fixed league bounds.')}
+        <span class="ov-h-n">${tb.rows.length} lineups</span>
+      </div>
+      ${S.tbSplits.loading ? emptyBlock('Loading split data…', 'Batter and pitcher handedness splits are still fetching.') : renderTBBars(tb.rows, tb.mins)}
+    </div>
+    ${banner}
+  `;
+
+  // Wire interactions
+  el.querySelectorAll('.sig-card').forEach(c => {
+    c.addEventListener('click', () => { const s = sigs[+c.dataset.si]; if (s && s.go) s.go(); });
+  });
+  el.querySelectorAll('.ks-dot').forEach(d => {
+    d.addEventListener('click', () => drillTo('boards', { bbSub: 'k', highlight: +d.dataset.spid }));
+  });
+  el.querySelectorAll('.tbl-row').forEach(r => {
+    r.addEventListener('click', () => drillTo('tb'));
+  });
 }
 
 </script>
