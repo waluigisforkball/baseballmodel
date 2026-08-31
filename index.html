@@ -78,6 +78,7 @@ body{background:var(--bg);color:var(--t);font-family:var(--fb);font-size:15px;li
 .ks-dot:hover circle:first-child{r:10}
 .ks-legend{display:flex;gap:16px;flex-wrap:wrap;padding:8px 8px 6px;font-size:10px;color:var(--t3);line-height:1.6}
 .ks-key{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle}
+.ks-ring{display:inline-block;width:9px;height:9px;border-radius:50%;border:1.6px solid #30d158;margin-right:5px;vertical-align:middle}
 
 /* TB lineup bars */
 .tbl-row{display:flex;align-items:center;gap:12px;background:var(--bg2);border:1px solid var(--b1);
@@ -1085,7 +1086,9 @@ function initOddsSlider() {
   const ov = document.getElementById('oddsVal');
   function upd() {
     S.oddsWt = +os.value;
-    ov.textContent = S.oddsWt + '%';
+    // The slider's nominal value is not the market's actual share. The odds
+    // signal is itself 60% stat score, so effective market weight = 0.4 × slider.
+    ov.textContent = S.oddsWt + '% (mkt ' + Math.round(S.oddsWt * 0.4) + '%)';
     of2.style.width = S.oddsWt + '%';
   }
   os.addEventListener('input', upd); upd();
@@ -4852,8 +4855,9 @@ workload = max(0, IP_per_start − 5.0) × 1.5</p>
 <ul style="margin:8px 0 8px 18px;line-height:2">
   <li><b>0%</b> — pure stats. Disagrees with the market often, which is the point.</li>
   <li><b>30–50%</b> — sharp money informs but does not override.</li>
-  <li><b>100%</b> — market only. A sanity check, not a bet source.</li>
+  <li><b>100%</b> — <b style="color:var(--y)">not</b> market only. The odds signal is itself 60% stat score, so the market's true share caps at <b>40%</b>. The readout next to the slider shows the real number.</li>
 </ul>
+<p style="margin-top:8px"><b style="color:var(--t)">Effective market weight = slider × 0.4.</b> The 30% default is really 12% market input.</p>
 <p>Distinct from Top Signals: this ranks whole games on a composite; Top Signals surfaces individual extremes across modules.</p>`
     },
     {
@@ -4865,7 +4869,9 @@ workload = max(0, IP_per_start − 5.0) × 1.5</p>
   <li><b>K Board</b> — click a scatter bubble or a K signal card. The pitcher you clicked is outlined.</li>
   <li><b>TB Targets</b> — click a lineup bar or a TB signal card. Full per-batter board with top overs and under candidates.</li>
 </ul>
-<p style="margin-top:8px">Both show the posted prop line next to the model score. <b style="color:var(--t)">The app does not yet compute a model-vs-line delta</b> — the model outputs a 0–100 score and the line is a strikeout or total-base count, which are different units. Comparing them is currently your eye's job. A projection layer that makes a true delta possible is the next phase.</p>`
+<p style="margin-top:8px"><b style="color:var(--t)">Market disagreement (⚖).</b> A bubble with a colored ring means the book set its line on the opposite side of the model's lean — green ring for a line that looks low, red for one that looks high. Both sides use absolute tiers: K lines under <b>5.5</b> are low and over <b>7.5</b> are high, league-wide and year-round. Strength blends how far apart the two are (50%), how strong the model's lean is (30%), and how cheap the book is priced on that side after removing the vig (20%).</p>
+<p style="margin-top:8px"><b style="color:#ff9f0a">This is a directional flag, not +EV.</b> It says the book looks low on a pitcher the model likes. It cannot tell you a bet is profitable — that needs P(over 6.5), which needs a projection layer the app does not have yet. The <b>MKT TOTAL</b> signal on the TB side is weaker still: a game total prices both lineups and both pitchers, so a strong lineup can sit in a low-total game just because the other side is dead. Held to a higher bar and labelled as a hint.</p>
+<p style="margin-top:8px">Both boards show the posted prop line next to the model score. <b style="color:var(--t)">The app does not yet compute a true model-vs-line delta</b> — the model outputs a 0–100 score and the line is a strikeout or total-base count, which are different units. Comparing them is currently your eye's job. A projection layer that makes a true delta possible is the next phase.</p>`
     },
     {
       icon: '🔥',
@@ -6006,6 +6012,106 @@ function mkTBBoardRow(t, rank) {
 
 
 // ═══════════════════════════════════════════════════════════════
+// ─── MARKET DISAGREEMENT ───────────────────────────────────────
+// Borrows the method from computeOddsSignal() in Edge Rankings: never
+// subtract a model score from a betting line (different units), just ask
+// whether the book set its number on the OPPOSITE side of the model's lean.
+//
+// Both sides are anchored to ABSOLUTE thresholds. Comparing model rank to
+// market rank would reintroduce the slate-relativity this build removed.
+// A 5.5 K line is a low line in April and in August.
+//
+// This is a DIRECTIONAL flag, not an EV calculation. It says the book looks
+// low on a pitcher the model likes. It cannot say a bet is +EV — that needs
+// P(over 6.5), which needs the Phase 1.5 projection layer.
+// ═══════════════════════════════════════════════════════════════
+
+function americanToProb(price) {
+  const p = parseFloat(price);
+  if (!Number.isFinite(p) || p === 0) return null;
+  return p > 0 ? 100 / (p + 100) : (-p) / ((-p) + 100);
+}
+// Strip the vig from a two-way market so the probability is the book's true read.
+// One-sided quotes return the raw (still vigged) number and are flagged.
+function devigOver(overPrice, underPrice) {
+  const o = americanToProb(overPrice), u = americanToProb(underPrice);
+  if (o == null && u == null) return { p: null, fair: false };
+  if (o == null) return { p: 1 - u, fair: false };
+  if (u == null) return { p: o, fair: false };
+  const tot = o + u;
+  return tot > 0 ? { p: o / tot, fair: true } : { p: null, fair: false };
+}
+
+// Absolute league-wide line tiers.
+const MKT = {
+  kLow: 5.5, kHigh: 7.5,     // strikeout prop lines
+  ouLow: 7.5, ouHigh: 9.0,   // game totals (same cuts Edge Rankings already uses)
+  modelOver: 72, modelUnder: 35,
+};
+
+// Shared scorer: continuous in the size of the disagreement, not a flat bonus.
+function _mkEdge(dir, gap, gapScale, conviction, pSide, fair) {
+  // How cheap the book is on the side we like. 0.55 implied is roughly neutral
+  // after devig; below that the book is discounting our side.
+  const cheap = pSide == null ? 0.5 : Math.max(0, Math.min(1, (0.55 - pSide) / 0.20));
+  const strength = Math.round(Math.min(1,
+    Math.min(1, gap / gapScale) * 0.50 +
+    Math.max(0, Math.min(1, conviction)) * 0.30 +
+    cheap * 0.20
+  ) * 100);
+  return { dir, gap: R(gap, 1), strength, pSide: pSide == null ? null : R(pSide, 3), fair };
+}
+
+// K props — the strong version. Model score and prop line describe the same event.
+function kMarketEdge(composite, prop) {
+  if (!prop || prop.line == null) return null;
+  const line = parseFloat(prop.line);
+  if (!Number.isFinite(line)) return null;
+
+  const lean = composite >= MKT.modelOver ? 'over'
+             : composite <= MKT.modelUnder ? 'under' : null;
+  if (!lean) return null;   // model has no strong opinion — nothing to disagree about
+
+  let gap = 0;
+  if (lean === 'over')  gap = MKT.kHigh - line;   // book set it BELOW a high line
+  else                  gap = line - MKT.kLow;    // book set it ABOVE a low line
+  if (gap <= 0) return null;                      // book already agrees — no edge
+
+  const conv = lean === 'over'
+    ? (composite - MKT.modelOver) / (100 - MKT.modelOver)
+    : (MKT.modelUnder - composite) / MKT.modelUnder;
+
+  const dv = devigOver(prop.overPrice, prop.underPrice);
+  const pSide = dv.p == null ? null : (lean === 'over' ? dv.p : 1 - dv.p);
+
+  const e = _mkEdge(lean, gap, 2.5, conv, pSide, dv.fair);
+  e.line = line;
+  e.label = lean === 'over'
+    ? `Model ${composite} but book posted o${line} — line looks low`
+    : `Model ${composite} but book posted o${line} — line looks high`;
+  return e;
+}
+
+// TB — deliberately the WEAKER version, and held to a higher bar.
+// A game total prices BOTH lineups and BOTH pitchers, so a strong lineup can sit
+// in a low-total game simply because the other side is dead. That is not the same
+// disagreement the K version detects. Team totals would fix this; the app does not
+// fetch them. Treat this as a hint, not a signal.
+function tbMarketEdge(pct, ouLine) {
+  const t = parseFloat(ouLine);
+  if (!Number.isFinite(t)) return null;
+  if (pct >= 78 && t <= MKT.ouHigh) {          // higher bar than the K version
+    const gap = MKT.ouHigh - t;
+    if (gap <= 0) return null;
+    const e = _mkEdge('over', gap, 2.0, (pct - 78) / 22, null, false);
+    e.line = t; e.weak = true;
+    e.label = `Lineup ${pct} but game total only ${t}`;
+    return e;
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ─── OVERVIEW (landing view) ───────────────────────────────────
 // Glance-first surface. Three blocks: Top Signals (tails of every
 // module), K Scatter (absolute axes), TB Lineup bars. Nothing here
@@ -6072,6 +6178,7 @@ function buildTopSignals(kRows, tbRows) {
 
   // K props — pitcher side
   for (const r of (kRows || [])) {
+    r.mkt = kMarketEdge(r.score.pct, r.prop);
     if (r.score.pct < SIG_THRESH.k) continue;
     const line = r.prop && r.prop.line != null ? `o${r.prop.line}` : null;
     sigs.push({
@@ -6088,6 +6195,24 @@ function buildTopSignals(kRows, tbRows) {
     });
   }
 
+  // Market disagreement — the book set its number opposite the model's lean.
+  // Emitted separately from the raw model signal because it answers a different
+  // question: not "is this a good matchup" but "has the book already priced it".
+  for (const r of (kRows || [])) {
+    const m = r.mkt || kMarketEdge(r.score.pct, r.prop);
+    if (!m || m.strength < 45) continue;
+    sigs.push({
+      kind: m.dir === 'over' ? 'MKT OVER' : 'MKT UNDER',
+      col: m.dir === 'over' ? '#30d158' : '#ff453a', icon: '⚖',
+      title: (r.sp.name || 'TBD'),
+      sub: `vs ${r.oppAbbr} · o${m.line}`,
+      why: m.label + (m.pSide != null ? ` · book implies ${Math.round(m.pSide * 100)}%${m.fair ? ' (devigged)' : ' (one-sided)'}` : ' · no prices'),
+      pct: m.strength,
+      badge: !m.fair ? confBadge('noline', 'Only one side quoted — implied probability still carries the vig') : '',
+      go: () => drillTo('boards', { bbSub: 'k', highlight: r.spId }),
+    });
+  }
+
   // TB — lineup side
   for (const r of (tbRows || [])) {
     if (r.pct < SIG_THRESH.tb) continue;
@@ -6100,6 +6225,22 @@ function buildTopSignals(kRows, tbRows) {
       badge: r.thin ? confBadge('thin', `Only ${r.qualified} bats clear the sample minimum`)
            : r.est  ? confBadge('est', 'Lineup not posted — roster estimate')
            : '',
+      go: () => drillTo('tb'),
+    });
+  }
+
+  // TB vs game total — weaker instrument, higher bar, labelled as a hint.
+  for (const r of (tbRows || [])) {
+    const g = filteredGames().find(x => x.game_id === r.gameId);
+    const m = tbMarketEdge(r.pct, g && (g.odds?.ou_line ?? g.ou_line));
+    if (!m || m.strength < 55) continue;
+    sigs.push({
+      kind: 'MKT TOTAL', col: '#ff9f0a', icon: '⚖',
+      title: `${r.team} lineup`,
+      sub: `vs ${r.oppSPName} · total ${m.line}`,
+      why: m.label,
+      pct: m.strength,
+      badge: confBadge('thin', 'Game total prices both lineups and both pitchers — weaker signal than the K version. Treat as a hint.'),
       go: () => drillTo('tb'),
     });
   }
@@ -6182,6 +6323,7 @@ function renderKScatter(rows) {
   const nNoL3 = rows.filter(r => !r.score.hasL3).length;
   const allEst  = nEst  === rows.length;
   const allNoL3 = nNoL3 === rows.length;
+  const nRing = rows.filter(r => { const m = r.mkt || kMarketEdge(r.score.pct, r.prop); return m && m.strength >= 45; }).length;
 
   const dots = rows.map(r => {
     const cx = x(r.score.pK_weighted), cy = y(r.score.oK);
@@ -6191,11 +6333,15 @@ function renderKScatter(rows) {
     const fEst  = r.score.mix.estimated && !allEst;   // amber  — lineup not posted
     const fNoL3 = !r.score.hasL3        && !allNoL3;  // slate  — no L3 workload log
     const line = r.prop && r.prop.line != null ? `o${r.prop.line}` : 'no line';
+    const mkt = r.mkt || kMarketEdge(r.score.pct, r.prop);
+    const ringCol = mkt && mkt.strength >= 45 ? (mkt.dir === 'over' ? '#30d158' : '#ff453a') : null;
     const notes = [];
+    if (mkt && mkt.strength >= 45) notes.push('market: ' + mkt.label);
     if (r.score.mix.estimated) notes.push('lineup not posted — league-average L/R mix');
     if (!r.score.hasL3)        notes.push('no L3 log — workload bonus not applied');
     if (r.score.thin)          notes.push('small sample — K% regressed toward league mean');
     return `<g class="ks-dot" data-gid="${r.gameId}" data-spid="${r.spId}">
+      ${ringCol ? `<circle cx="${cx}" cy="${cy}" r="11.5" fill="none" stroke="${ringCol}" stroke-width="1.6" opacity=".9"/>` : ''}
       <circle cx="${cx}" cy="${cy}" r="7" fill="${col}" stroke="var(--bg)" stroke-width="2"/>
       ${fEst  ? `<circle cx="${cx + 7}" cy="${cy - 7}" r="3" fill="#ff9f0a" stroke="var(--bg)" stroke-width="1.5"/>` : ''}
       ${fNoL3 ? `<circle cx="${cx + 7}" cy="${cy + 7}" r="3" fill="var(--t3)" stroke="var(--bg)" stroke-width="1.5"/>` : ''}
@@ -6222,6 +6368,7 @@ Composite ${r.score.pct} · Prop ${line}${notes.length ? '\n⚠ ' + notes.join('
       ${allNoL3 ? '<span><b style="color:var(--t3)">No L3 logs on this slate</b> — workload bonus off for everyone</span>'
                 : (nNoL3 ? `<span><span class="ks-key" style="background:var(--t3)"></span>no L3 log (${nNoL3})</span>` : '')}
       ${(!nEst && !nNoL3) ? '<span style="color:var(--t3)">All starters on real lineup + workload data</span>' : ''}
+      ${nRing ? `<span><span class="ks-ring"></span>book disagrees with model (${nRing}) — directional flag, not +EV</span>` : ''}
     </div>
   </div>`;
 }
