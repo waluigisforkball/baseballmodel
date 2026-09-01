@@ -49,6 +49,15 @@ body{background:var(--bg);color:var(--t);font-family:var(--fb);font-size:15px;li
 .rd-t{font-size:12.5px;color:var(--t2);line-height:1.7;margin-bottom:7px}
 .rd-b{font-size:12.5px;color:var(--t2);line-height:1.7;margin-bottom:8px;padding-left:15px;position:relative}
 .rd-b:before{content:'·';position:absolute;left:3px;color:var(--t3);font-weight:700}
+.rd-item{margin-bottom:13px;padding-left:12px;border-left:2px solid var(--b1)}
+.rd-line{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.rd-name{font-size:13.5px;color:var(--t2)}
+.rd-name b{color:var(--t);font-weight:700}
+.rd-val{font-family:var(--fm);font-size:13px;font-weight:700;color:var(--g);white-space:nowrap}
+.rd-sub{font-size:12.5px;color:var(--t2);line-height:1.6;margin-top:3px}
+.rd-sub b{color:var(--t)}
+.rd-nums{font-family:var(--fm);font-size:10.5px;color:var(--t3);margin-top:4px;line-height:1.5}
+.rd-warn{font-size:11px;color:#ff9f0a;margin-top:4px;line-height:1.5}
 .rd-b b,.rd-t b{color:var(--t)}
 
 /* ─── OVERVIEW ─── */
@@ -6170,6 +6179,7 @@ function mkTBBoardRow(t, rank) {
 const RD_LG = { teamK: 22.3, tbLineup: 0.455 };  // league reference points for deltas
 
 function _sgn(n, d = 1) { const v = +n; return (v >= 0 ? '+' : '') + v.toFixed(d); }
+const _pl = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
 
 function buildRundown() {
   const gs = filteredGames();
@@ -6193,13 +6203,13 @@ function buildRundown() {
 
   const kAvg = kRows.length ? kRows.reduce((s, r) => s + r.score.pct, 0) / kRows.length : null;
   L.push({ h: 'SLATE SHAPE' });
-  L.push({ t: `${gs.length} game${gs.length === 1 ? '' : 's'} · ${kRows.length} starters · `
+  L.push({ t: `${_pl(gs.length, 'game')} · ${_pl(kRows.length, 'starter')} · `
     + (kAvg != null ? `average K matchup ${Math.round(kAvg)}/100` : 'no K scores') });
 
   if (!total) {
     L.push({ t: 'Nothing clears the absolute thresholds. This is a flat slate — no matchup is far enough from league average to act on. That is a real answer, not missing data.' });
   } else {
-    L.push({ t: `${total} item${total === 1 ? '' : 's'} clear the bar: `
+    L.push({ t: `${_pl(total, 'item')} ${total === 1 ? 'clears' : 'clear'} the bar: `
       + [kQual.length && `${kQual.length} K`, mkts.length && `${mkts.length} market`,
          tbQual.length && `${tbQual.length} TB`, (yHi.length + yLo.length) && `${yHi.length + yLo.length} first-inning`]
         .filter(Boolean).join(' · ') });
@@ -6211,16 +6221,19 @@ function buildRundown() {
     for (const r of kQual.slice(0, 4)) {
       const dK = r.score.pK_weighted - LEAGUE_MEAN.pK;
       const dO = r.score.oK - RD_LG.teamK;
-      const line = r.prop && r.prop.line != null ? `o${r.prop.line}` : 'no line posted';
-      const caveat = [
-        r.score.thin && 'small sample, regressed',
-        r.score.mix.estimated && 'lineup not posted',
-        !r.score.hasL3 && 'no workload data',
-      ].filter(Boolean).join('; ');
-      L.push({ b: `<b>${r.sp.name}</b> (${r.sp.hand}) vs ${r.oppAbbr} — <b>${r.score.pct}</b>/100. `
-        + `K% ${r.score.pK_weighted.toFixed(1)} (${_sgn(dK)} vs lg ${LEAGUE_MEAN.pK}), `
-        + `opp lineup ${r.score.oK.toFixed(1)}% (${_sgn(dO)} vs lg ${RD_LG.teamK}). Book: ${line}.`
-        + (caveat ? ` <i style="color:#ff9f0a">⚠ ${caveat}</i>` : '') });
+      const line = r.prop && r.prop.line != null ? `o${r.prop.line}` : null;
+      // Plain-English read of WHY it scored, so the number isn't the only content
+      const armWord = dK > 8 ? 'Elite strikeout arm' : dK > 4 ? 'Strong strikeout arm' : 'Above-average arm';
+      const luWord  = dO > 2 ? 'against a lineup that whiffs a lot'
+                    : dO > -1 ? 'against a roughly average lineup'
+                    : 'but the lineup makes contact';
+      L.push({ b: `<b>${r.sp.name}</b> (${r.sp.hand}) vs ${r.oppAbbr}`, r: `${r.score.pct}/100`,
+        sub: `${armWord} ${luWord}.`,
+        nums: `his K% ${r.score.pK_weighted.toFixed(1)} (${_sgn(dK)}) · their K% ${r.score.oK.toFixed(1)} (${_sgn(dO)}) · `
+            + (line ? `book ${line}` : 'no line posted'),
+        warn: [ r.score.thin && 'small sample, regressed toward league mean',
+                r.score.mix.estimated && 'lineup not posted — this will move',
+                !r.score.hasL3 && 'no recent workload data' ].filter(Boolean).join(' · ') });
     }
     if (kQual.length > 4) L.push({ t: `…${kQual.length - 4} more above ${SIG_THRESH.k}.` });
   }
@@ -6231,14 +6244,16 @@ function buildRundown() {
     L.push({ h: 'EDGE VS THE BOOK' });
     for (const r of edges.sort((a, b) => b.proj.edgePts - a.proj.edgePts).slice(0, 4)) {
       const e = r.proj;
-      L.push({ b: `<b>${r.sp.name}</b> — projected <b>${e.projK}K</b> over ${e.expIP} IP (${e.expBF} BF at ${e.kRate}% matchup rate). `
-        + `Book line o${e.line}, delta <b>${e.delta >= 0 ? '+' : ''}${e.delta}</b>. `
-        + `Model ${Math.round(e.modelP * 100)}% ${e.dir} vs book ${Math.round(e.bookP * 100)}% — <b>${e.edgePts} point</b> edge.`
-        + (e.tier === 'absurd' ? ` <i style="color:#ff9f0a">⚠ implausibly large; suspect the projection, not the book</i>`
-          : e.assumedIP ? ` <i style="color:#ff9f0a">⚠ innings assumed</i>`
-          : e.soft ? ` <i style="color:#ff9f0a">⚠ soft inputs</i>` : '') });
+      const bm = e.bookMean != null ? `the book is priced around <b>${e.bookMean}K</b>` : 'the book disagrees';
+      L.push({ b: `<b>${r.sp.name}</b> — ${e.dir.toUpperCase()} ${e.line}`, r: `${e.edgePts} pt`,
+        sub: `We project <b>${e.projK}K</b>; ${bm}. That gap is ${Math.abs(R(e.projK - (e.bookMean ?? e.line), 1))} strikeouts.`,
+        nums: `${e.expIP} IP × ${e.expBF} BF at ${e.kRate}% · model ${Math.round(e.modelP * 100)}% vs book ${Math.round(e.bookP * 100)}% · innings from ${e.ipSrc}`,
+        warn: e.tier === 'absurd' ? 'An edge this big is more often our projection being wrong than the book being wrong. Check the innings estimate first.'
+            : e.assumedIP ? 'No innings data — using a league-default start length'
+            : e.oneSided ? 'Only one side quoted, so the vig is still in the book number'
+            : e.soft ? 'Thin sample or unposted lineup feeding this' : '' });
     }
-    L.push({ t: '<i>Strikeouts modelled as Poisson, which is under-dispersed for real K counts — tail probabilities are too confident. Edges above ' + EDGE.strong + ' points deserve scrutiny before trust.</i>' });
+    L.push({ t: `<i>K counts modelled as negative binomial (variance ${DISPERSION}× mean). At these projection levels a half-strikeout error moves the probability by 7–9 points, so anything above ${EDGE.strong} points is as likely to be our error as the book's.</i>` });
   }
 
   if (mkts.length && !edges.length) {
@@ -6259,20 +6274,29 @@ function buildRundown() {
     L.push({ h: 'TOTAL BASES' });
     for (const r of tbQual.slice(0, 4)) {
       const d = r.raw - RD_LG.tbLineup;
-      L.push({ b: `<b>${r.team}</b> vs ${r.oppSPName} (${r.spHand}) — <b>${r.pct}</b>/100. `
-        + `Top ${r.core.length} bats average ${r.raw.toFixed(3)} (${_sgn(d, 3)} vs lg ${RD_LG.tbLineup}).`
-        + (r.thin ? ` <i style="color:#ff9f0a">⚠ only ${r.qualified} bats qualify</i>` : '')
-        + (r.est ? ` <i style="color:#ff9f0a">⚠ roster estimate</i>` : '') });
+      L.push({ b: `<b>${r.team}</b> vs ${r.oppSPName} (${r.spHand})`, r: `${r.pct}/100`,
+        sub: `Good spot for total bases — the top of this lineup profiles well against him.`,
+        nums: `top ${r.core.length} bats average ${r.raw.toFixed(3)} (${_sgn(d, 3)} vs lg ${RD_LG.tbLineup})`,
+        warn: [ r.thin && `only ${r.qualified} bats clear the sample minimum`,
+                r.est && 'lineup not posted — roster estimate' ].filter(Boolean).join(' · ') });
     }
   }
 
   // ── First inning ──
   if (yHi.length || yLo.length) {
     L.push({ h: 'FIRST INNING' });
-    for (const g of yHi.sort((a, b) => b.yrfi.pct - a.yrfi.pct).slice(0, 3))
-      L.push({ b: `<b>${g.away} @ ${g.home}</b> — YRFI <b>${g.yrfi.pct}%</b> (${g.away} ${g.yrfi.awayPct}% / ${g.home} ${g.yrfi.homePct}%). Lean yes.` });
-    for (const g of yLo.sort((a, b) => a.yrfi.pct - b.yrfi.pct).slice(0, 3))
-      L.push({ b: `<b>${g.away} @ ${g.home}</b> — YRFI <b>${g.yrfi.pct}%</b> (${g.away} ${g.yrfi.awayPct}% / ${g.home} ${g.yrfi.homePct}%). Lean no.` });
+    const yLine = (g, yes) => {
+      const hot = g.yrfi.awayPct >= g.yrfi.homePct ? g.away : g.home;
+      const hp  = Math.max(g.yrfi.awayPct, g.yrfi.homePct);
+      const cp  = Math.min(g.yrfi.awayPct, g.yrfi.homePct);
+      return { b: `<b>${g.away} @ ${g.home}</b> — ${yes ? 'YRFI' : 'NRFI'}`, r: `${g.yrfi.pct}%`,
+        sub: yes ? `Mostly driven by ${hot} at ${hp}% — the other side is ${cp}%.`
+                 : `Both sides quiet in the first: ${g.away} ${g.yrfi.awayPct}%, ${g.home} ${g.yrfi.homePct}%.`,
+        nums: `${g.away} ${g.yrfi.awayPct}% · ${g.home} ${g.yrfi.homePct}%`,
+        warn: (g.yrfi.awayFromData || g.yrfi.homeFromData) ? '' : 'no linescore data — using an SP-stats proxy' };
+    };
+    for (const g of yHi.sort((a, b) => b.yrfi.pct - a.yrfi.pct).slice(0, 3)) L.push(yLine(g, true));
+    for (const g of yLo.sort((a, b) => a.yrfi.pct - b.yrfi.pct).slice(0, 3)) L.push(yLine(g, false));
     L.push({ t: '<i>Unaffected by lineups — built from team first-inning rates and starter vulnerability only.</i>' });
   }
 
@@ -6285,12 +6309,12 @@ function buildRundown() {
   const nNoLine = kRows.filter(r => !r.prop || r.prop.line == null).length;
   if (nEst === kRows.length && kRows.length) cav.push(`<b>No lineups posted.</b> Every K score uses a league-average 3L/5R/1S mix. Expect horizontal movement on the scatter once cards drop; Y positions and YRFI will not move.`);
   else if (nEst) cav.push(`${nEst} of ${kRows.length} lineups not posted — those K scores will shift.`);
-  if (nThin) cav.push(`${nThin} pitcher${nThin === 1 ? '' : 's'} on small samples, regressed toward the ${LEAGUE_MEAN.pK}% league mean.`);
+  if (nThin) cav.push(`${_pl(nThin, 'pitcher')} on small samples, regressed toward the ${LEAGUE_MEAN.pK}% league mean.`);
   if (nNoL3 === kRows.length && kRows.length) cav.push(`No last-3-start logs on this slate — workload bonus is off for everyone.`);
-  else if (nNoL3) cav.push(`${nNoL3} missing workload data.`);
+  else if (nNoL3) cav.push(`${_pl(nNoL3, 'pitcher')} missing recent workload data.`);
   if (!S.oddsOk) cav.push(`<b>Odds unavailable</b> — no market comparison possible.`);
   else if (nNoLine === kRows.length && kRows.length) cav.push(`No K props posted yet — market comparison unavailable.`);
-  else if (nNoLine) cav.push(`${nNoLine} pitchers have no posted K prop.`);
+  else if (nNoLine) cav.push(`${_pl(nNoLine, 'pitcher')} ${nNoLine === 1 ? 'has' : 'have'} no posted K prop.`);
   if (tb.mins && tb.mins.scaled) cav.push(`Early season: sample gates scaled to ${tb.mins.batterPA} PA / ${tb.mins.pitcherIP} IP.`);
   cav.push(`Bullpen figures anywhere in the app are a fixed team-pitching proxy and cannot separate bullpen from rotation. Do not bet off them.`);
   cav.forEach(c => L.push({ b: c }));
@@ -6300,19 +6324,32 @@ function buildRundown() {
 
 // Plain-text version for copying into notes
 function rundownToText(lines) {
-  const strip = h => h.replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  const strip = h => String(h || '').replace(/<[^>]+>/g, '').replace(/&quot;/g, '"').replace(/&amp;/g, '&');
   const d = S.date || todayISO();
-  return `WALUIGI'S FORKBALL — SLATE RUNDOWN — ${d}\n`
-    + lines.map(l => l.h ? `\n${l.h}\n${'─'.repeat(l.h.length)}` : l.b ? `• ${strip(l.b)}` : strip(l.t)).join('\n');
+  const out = [`WALUIGI'S FORKBALL — SLATE RUNDOWN — ${d}`];
+  for (const l of lines) {
+    if (l.h) { out.push('', l.h, '─'.repeat(l.h.length)); continue; }
+    if (!l.b) { out.push(strip(l.t)); continue; }
+    out.push(`• ${strip(l.b)}${l.r ? '  —  ' + strip(l.r) : ''}`);
+    if (l.sub)  out.push(`    ${strip(l.sub)}`);
+    if (l.nums) out.push(`    ${strip(l.nums)}`);
+    if (l.warn) out.push(`    ! ${strip(l.warn)}`);
+  }
+  return out.join('\n');
 }
 
 function showRundown() {
   const lines = buildRundown();
-  const body = lines.map(l =>
-    l.h ? `<div class="rd-h">${l.h}</div>`
-    : l.b ? `<div class="rd-b">${l.b}</div>`
-    : `<div class="rd-t">${l.t}</div>`
-  ).join('');
+  const body = lines.map(l => {
+    if (l.h) return `<div class="rd-h">${l.h}</div>`;
+    if (!l.b) return `<div class="rd-t">${l.t}</div>`;
+    return `<div class="rd-item">
+      <div class="rd-line"><span class="rd-name">${l.b}</span>${l.r ? `<span class="rd-val">${l.r}</span>` : ''}</div>
+      ${l.sub  ? `<div class="rd-sub">${l.sub}</div>` : ''}
+      ${l.nums ? `<div class="rd-nums">${l.nums}</div>` : ''}
+      ${l.warn ? `<div class="rd-warn">⚠ ${l.warn}</div>` : ''}
+    </div>`;
+  }).join('');
   document.getElementById('rundownContent').innerHTML = body;
   document.getElementById('rundownDate').textContent = S.date || todayISO();
   document.getElementById('rundownModal').style.display = 'block';
@@ -6453,6 +6490,7 @@ const PROJ = {
   defaultWHIP: 1.25,
   ipMin: 3.5, ipMax: 7.5,
   w_l3: 0.45,         // three starts is recent but small; season carries more weight
+  extraBF: 0.06,      // HBP + reached-on-error + sac, per IP — not captured by WHIP
 };
 
 // Log5 / odds-ratio: combines two rates against a league baseline. The standard
@@ -6490,7 +6528,10 @@ function projectK(row) {
 
   const e = expectedIP(sp, row.l3);
   const whip = Number.isFinite(parseFloat(sp.whip)) ? parseFloat(sp.whip) : PROJ.defaultWHIP;
-  const bf = e.ip * (3 + whip);
+  // WHIP only counts hits and walks. Batters also reach on HBP, errors, and sac
+  // flies/bunts, all of which are plate appearances. League rate is ~0.06 per IP;
+  // omitting it undercounts BF by about 1.5%.
+  const bf = e.ip * (3 + whip + PROJ.extraBF);
   const projK = (kRate / 100) * bf;
 
   return {
@@ -6573,6 +6614,7 @@ function kProjEdge(row) {
 
   return {
     ...pr, line,
+    bookMean: impliedMean(line, bookOver),
     delta: R(pr.projK - line, 1),
     modelP: R(dir === 'over' ? modelOver : 1 - modelOver, 3),
     bookP:  R(dir === 'over' ? bookOver  : 1 - bookOver,  3),
@@ -6583,6 +6625,19 @@ function kProjEdge(row) {
         : edgePts >= EDGE.strong ? (oneSided ? 'flag' : 'strong')
         : edgePts >= EDGE.flag ? 'flag' : 'none',
   };
+}
+
+// Invert the distribution: what mean is the BOOK pricing? Comparing two strikeout
+// counts is far easier to sanity-check than comparing two probabilities, and it
+// makes systematic bias visible at a glance.
+function impliedMean(line, pOverBook) {
+  if (!(pOverBook > 0 && pOverBook < 1)) return null;
+  let lo = 0.5, hi = 15;
+  for (let i = 0; i < 60; i++) {
+    const m = (lo + hi) / 2;
+    (1 - kAtMost(Math.floor(line), m)) < pOverBook ? lo = m : hi = m;
+  }
+  return R((lo + hi) / 2, 1);
 }
 
 // One-line summary used by signals, tooltips and the rundown.
