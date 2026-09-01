@@ -1625,6 +1625,7 @@ async function fetchPStat(sp, pid, season) {
     sp.era  = parseFloat(st.era)||null; sp.whip = parseFloat(st.whip)||null;
     sp.hr9  = parseFloat(st.homeRunsPer9)||null;
     sp.ip   = R(parseFloat(st.inningsPitched)||0, 1); // stored for sample-size filtering
+    sp.gs   = parseInt(st.gamesStarted)||null;        // needed for IP/start in projectK()
     sp.k9   = ip>0 ? R(so/ip*9,2) : null;
     sp.bb9  = ip>0 ? R(bb/ip*9,2) : null;
     sp.k_pct= bf>0 ? R(so/bf*100,1) : null;
@@ -4819,6 +4820,8 @@ function showGuide() {
 <p style="margin-top:8px"><b style="color:var(--t)">Shrinkage.</b> Low-sample rates are pulled toward the league mean so a pitcher two starts in with a fluky 38% K rate does not plot in the corner of the scatter and look like the play of the slate:</p>
 <p style="margin:6px 0 6px 18px;font-family:var(--fm);font-size:12px;color:var(--t2)">adjusted = (n × observed + k × prior) ÷ (n + k)</p>
 <p>where <b>k</b> is the stabilization point per stat — pitcher K% <b>70</b> BF, batter K% <b>60</b> PA, SLG <b>320</b> PA, ISO <b>160</b> PA. SLG stabilizes slowly, which is why <b style="color:var(--pu)">the TB model is genuinely weaker than the K model before roughly June</b>. The badges will tell you when that is biting.</p>
+<p style="margin-top:8px"><b style="color:var(--t)">Prior-season priors.</b> When a pitcher has a qualifying prior year (<b>40+ IP</b>), his low-sample rate is regressed toward <b>his own</b> last-season K% instead of the league mean. A pitcher who struck out 29% last year and is three starts into this one lands near his real talent, not near 22.3%. Starters without a qualifying prior year fall back to the league mean, and the Overview note says how many of each. Skipped entirely in March and early April, when the app is already reading last season's stats.</p>
+<p style="margin-top:8px"><b style="color:var(--t)">Switch hitters.</b> A switch hitter bats opposite the pitcher, so he counts as a left-handed bat against a RHP and a right-handed bat against a LHP, and he always holds the platoon advantage. One helper (<code>effectiveBatSide</code>) now owns that rule everywhere it applies.</p>
 <p style="margin-top:8px"><b style="color:var(--t)">Season-adaptive minimums.</b> While the app is still using last season's stats, the standard 50 PA / 20 IP gates apply. Once it flips to the current season in mid-April, samples reset and those gates would empty the boards for six weeks — so they scale down with games elapsed (floor 15 PA / 6 IP) and the Overview note tells you the current values.</p>`
     },
     {
@@ -4894,7 +4897,15 @@ workload = max(0, IP_per_start − 5.0) × 1.5</p>
   <li><b>TB Targets</b> — click a lineup bar or a TB signal card. Full per-batter board with top overs and under candidates.</li>
 </ul>
 <p style="margin-top:8px"><b style="color:var(--t)">Market disagreement (⚖).</b> A bubble with a colored ring means the book set its line on the opposite side of the model's lean — green ring for a line that looks low, red for one that looks high. Both sides use absolute tiers: K lines under <b>5.5</b> are low and over <b>7.5</b> are high, league-wide and year-round. Strength blends how far apart the two are (50%), how strong the model's lean is (30%), and how cheap the book is priced on that side after removing the vig (20%).</p>
-<p style="margin-top:8px"><b style="color:#ff9f0a">This is a directional flag, not +EV.</b> It says the book looks low on a pitcher the model likes. It cannot tell you a bet is profitable — that needs P(over 6.5), which needs a projection layer the app does not have yet. The <b>MKT TOTAL</b> signal on the TB side is weaker still: a game total prices both lineups and both pitchers, so a strong lineup can sit in a low-total game just because the other side is dead. Held to a higher bar and labelled as a hint.</p>
+<p style="margin-top:8px"><b style="color:var(--t)">Projected strikeouts (◆ EDGE).</b> The app now projects an actual K count, so it can compare like with like:</p>
+<p style="margin:6px 0 6px 18px;font-family:var(--fm);font-size:12px;color:var(--t2)">projected K = expected BF × matchup K%<br>
+expected BF = expected IP × (3 + WHIP)<br>
+expected IP = 0.45 × L3 IP/start + 0.55 × season IP/start &nbsp;(clamped 3.5–7.5)<br>
+matchup K% = Log5(pitcher K%, opponent K%, league 22.3%)</p>
+<p><b>Log5</b> is the standard odds-ratio matchup formula — a 31% K pitcher against a 26% K lineup projects <b>36%</b>, higher than either input, which a simple average cannot express. <b>BF from WHIP</b> rather than a flat 4.2 per inning, because a pitcher who allows more baserunners faces more hitters.</p>
+<p style="margin-top:8px">Probability comes from a <b>negative binomial</b>, not Poisson. Poisson forces variance to equal the mean, but real start-level K counts are overdispersed (hooks, blowouts, pitch limits fatten the low tail), which made the model far too confident and inflated every apparent edge. Dispersion is set to <b>1.25×</b> the mean. The edge shown is <b>your probability minus the book's devigged probability, in percentage points</b>: flag at ${'3'}, strong at ${'6'}, and above ${'12'} it is labelled implausible — at that size suspect the projection before you suspect the book.</p>
+<p style="margin-top:8px"><b style="color:#ff9f0a">Read the edge with suspicion.</b> It is highly sensitive to the projection: a one-strikeout projection error produces roughly an 8-point swing. Against realistic starter profiles the model lands within about half a strikeout of typical posted lines, so genuine edges should be small and rare. A large one usually means an input is wrong — check the innings estimate and the lineup badge first.</p>
+<p style="margin-top:8px"><b style="color:#ff9f0a">The ⚖ tier heuristic is the fallback, not +EV.</b> It says the book looks low on a pitcher the model likes. It cannot tell you a bet is profitable — that needs P(over 6.5), which needs a projection layer the app does not have yet. The <b>MKT TOTAL</b> signal on the TB side is weaker still: a game total prices both lineups and both pitchers, so a strong lineup can sit in a low-total game just because the other side is dead. Held to a higher bar and labelled as a hint.</p>
 <p style="margin-top:8px">Both boards show the posted prop line next to the model score. <b style="color:var(--t)">The app does not yet compute a true model-vs-line delta</b> — the model outputs a 0–100 score and the line is a strikeout or total-base count, which are different units. Comparing them is currently your eye's job. A projection layer that makes a true delta possible is the next phase.</p>`
     },
     {
@@ -4938,6 +4949,96 @@ workload = max(0, IP_per_start − 5.0) × 1.5</p>
 </div>`).join('');
 
   document.getElementById('guideModal').style.display = 'block';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ─── SWITCH HITTERS ────────────────────────────────────────────
+// A switch hitter bats OPPOSITE the pitcher, always. Three places in the app
+// hardcoded him to one side instead, and they failed in opposite directions:
+//   · sKBoard lineup weighting counted 'S' as LEFT always  → wrong vs LHP
+//   · TB pitcherSLGvsBatter counted 'S' as RIGHT always    → wrong vs RHP
+//   · platoon-advantage checks never matched 'S' at all    → wrong vs both,
+//     even though a switch hitter has the platoon edge BY DEFINITION.
+// One helper now owns the rule.
+// ═══════════════════════════════════════════════════════════════
+
+// Which side does this batter actually stand on against this pitcher?
+function effectiveBatSide(batterHand, pitcherHand) {
+  const b = (batterHand || 'R').toUpperCase();
+  const p = (pitcherHand || 'R').toUpperCase();
+  if (b === 'S') return p === 'L' ? 'R' : 'L';   // opposite the pitcher
+  return b === 'L' ? 'L' : 'R';
+}
+// Switch hitters always hold the platoon advantage.
+function hasPlatoonAdv(batterHand, pitcherHand) {
+  const b = (batterHand || 'R').toUpperCase();
+  if (b === 'S') return true;
+  return effectiveBatSide(b, pitcherHand) !== (pitcherHand || 'R').toUpperCase();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ─── PRIOR-SEASON PRIORS ───────────────────────────────────────
+// Fills the pluggable prior slot built into shrink(). A pitcher who posted a
+// 29% K rate last year sitting on three starts should regress toward 29%, not
+// toward the 22.3% league mean.
+//
+// Skipped entirely when activeStatsSeason() is already pointing at last year —
+// the stat IS the prior season then, and shrinking it toward itself is a no-op
+// that costs 30 requests. That covers all of March and early April for free.
+// ═══════════════════════════════════════════════════════════════
+
+const PR = { pitchers: {}, loaded: false, loading: false, dateKey: null, skipped: null };
+const PRIOR_MIN_IP = 40;   // below this the prior is itself noise — fall back to league mean
+
+async function fetchPriorSeasons() {
+  const d = S.date || todayISO();
+  if (PR.dateKey !== d) { PR.pitchers = {}; PR.loaded = false; PR.skipped = null; }
+  PR.dateKey = d;
+  if (PR.loaded || PR.loading) return;
+
+  const yr = parseInt(d.slice(0, 4));
+  if (parseInt(activeStatsSeason(d)) < yr) {
+    PR.skipped = 'already on prior-season stats';
+    PR.loaded = true;
+    return;
+  }
+
+  const sps = [];
+  for (const g of S.games) {
+    if (g.asp && g.away_sp_id) sps.push([g.away_sp_id, g.asp]);
+    if (g.hsp && g.home_sp_id) sps.push([g.home_sp_id, g.hsp]);
+  }
+  if (!sps.length) { PR.loaded = true; return; }
+
+  PR.loading = true;
+  const prevSeason = yr - 1;
+  try {
+    await Promise.all(sps.map(async ([pid, sp]) => {
+      if (PR.pitchers[pid] !== undefined) { sp._priorK = PR.pitchers[pid]; return; }
+      try {
+        const r = await proxyFetch(`${MLB_BASE}/people/${pid}/stats?stats=season&season=${prevSeason}&group=pitching&sportId=1`);
+        const st = r?.stats?.[0]?.splits?.[0]?.stat;
+        if (!st) { PR.pitchers[pid] = null; return; }
+        const ip = parseFloat(st.inningsPitched) || 0;
+        const bf = parseInt(st.battersFaced) || Math.round(ip * 4.2);
+        const so = parseInt(st.strikeOuts) || 0;
+        // A thin prior season is not a better prior than the league mean.
+        const k = (ip >= PRIOR_MIN_IP && bf > 0) ? R(so / bf * 100, 1) : null;
+        PR.pitchers[pid] = k;
+        sp._priorK = k;
+      } catch { PR.pitchers[pid] = null; }
+    }));
+  } finally {
+    PR.loading = false;
+    PR.loaded = true;
+  }
+}
+
+// How many starters on this slate are being shrunk toward their own prior season
+// rather than the league mean — surfaced in the Overview note and the rundown.
+function priorCoverage(kRows) {
+  const n = (kRows || []).filter(r => r.sp && r.sp._priorK != null).length;
+  return { withPrior: n, total: (kRows || []).length };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -5137,7 +5238,11 @@ function scoreTBTargets() {
           ? (num(workerBatterSplit.vsR) ?? num(bSplit(b, 'R').slg) ?? num(b.slg) ?? 0.380)
           : (num(workerBatterSplit.vsL) ?? num(bSplit(b, 'L').slg) ?? num(b.slg) ?? 0.380);
 
-        const pitcherSLGvsBatter = (bHand === 'L')
+        // Switch hitters bat opposite the SP, so a switch hitter facing a RHP is a
+        // LEFT-handed batter for the purpose of the pitcher's split. Treating 'S' as
+        // right unconditionally was wrong against every RHP — roughly 2/3 of starts.
+        const batSide = effectiveBatSide(bHand, spHand);
+        const pitcherSLGvsBatter = (batSide === 'L')
           ? (num(pSplits.vsL) ?? num(oppSP?.slg_against) ?? 0.400)
           : (num(pSplits.vsR) ?? num(oppSP?.slg_against) ?? 0.400);
 
@@ -5448,7 +5553,7 @@ async function computePitchMashMatchups() {
       if (mash == null) continue;
 
       const bHand = batter.hand || 'R';
-      const platAdv = (bHand === 'L' && sp.hand === 'R') || (bHand === 'R' && sp.hand === 'L');
+      const platAdv = hasPlatoonAdv(bHand, sp.hand);   // 'S' always qualifies
       const split = sp.hand === 'L' ? batter.vsL : batter.vsR;
 
       matchups.push({
@@ -5550,7 +5655,7 @@ async function renderPitchMash() {
     const mashPct = Math.round((mash / maxMash) * 100);
     const mashCol = mash >= 75 ? 'var(--pu)' : mash >= 55 ? 'var(--g)' : mash >= 35 ? 'var(--y)' : 'var(--t2)';
     const bHand   = batter.hand || 'R';
-    const platAdv = (bHand === 'L' && sp.hand === 'R') || (bHand === 'R' && sp.hand === 'L');
+    const platAdv = hasPlatoonAdv(bHand, sp.hand);     // 'S' always qualifies
 
     // Build pitch mix pills (top 3)
     const topMix = mix.slice(0, 3).map(p =>
@@ -5719,10 +5824,15 @@ function sKBoard(pitcher, oppTeam, oppLineup, l3) {
   const pHand = pitcher.hand || 'R';
   const mix = lineupHandMix(oppLineup);
 
-  // Weight the pitcher's K% by lineup composition (e.g. 70% LHB → 70% weight on vsL)
+  // Weight the pitcher's K% by lineup composition (e.g. 70% LHB → 70% weight on vsL).
+  // Switch hitters bat OPPOSITE the pitcher, so which column they land in depends
+  // on pHand. Counting them as left unconditionally overstated K% vs LHP by ~8
+  // composite points on a lineup with two switch hitters.
   const totalBatters = mix.lhb + mix.rhb + mix.sw || 9;
-  const lWeight = (mix.lhb + mix.sw) / totalBatters;
-  const rWeight = mix.rhb / totalBatters;
+  const swLeft  = pHand === 'L' ? 0 : mix.sw;   // vs LHP a switch hitter bats right
+  const swRight = pHand === 'L' ? mix.sw : 0;
+  const lWeight = (mix.lhb + swLeft)  / totalBatters;
+  const rWeight = (mix.rhb + swRight) / totalBatters;
 
   const pK_vsL = pitcher.vsL?.k_pct ?? pitcher.k_pct ?? 22;
   const pK_vsR = pitcher.vsR?.k_pct ?? pitcher.k_pct ?? 22;
@@ -5733,7 +5843,9 @@ function sKBoard(pitcher, oppTeam, oppLineup, l3) {
   // absolutely-anchored scatter and look like the play of the slate.
   // Batters faced ≈ IP × 4.2.
   const bfSample = Number.isFinite(parseFloat(pitcher.ip)) ? parseFloat(pitcher.ip) * 4.2 : 0;
-  const pShr = shrink(pK_raw, bfSample, 'pK');
+  // Prior slot: the pitcher's own prior-season K% when we have a real one,
+  // league mean otherwise (see fetchPriorSeasons).
+  const pShr = shrink(pK_raw, bfSample, 'pK', pitcher._priorK);
   const pK_weighted = pShr.value;
 
   // Opp team's K% specifically vs this pitcher's hand
@@ -5755,6 +5867,7 @@ function sKBoard(pitcher, oppTeam, oppLineup, l3) {
     hasL3: l3 != null,
     thin: pShr.thin,        // rate is mostly prior, not observation
     sampleW: R(pShr.w, 2),  // 0 = all prior, 1 = all observed
+    priorUsed: pitcher._priorK != null ? R(pitcher._priorK, 1) : null,
   };
 }
 
@@ -5857,6 +5970,13 @@ function buildKBoardRows() {
 function mkKRow(r, rank) {
   const sp = r.sp;
   const isHL = S._highlight != null && r.spId === S._highlight;
+  const pe = r.proj || (r.proj = kProjEdge(r));
+  const projHtml = pe
+    ? `<div style="font-family:var(--fm);font-size:10px;margin-top:3px;color:${pe.tier === 'none' ? 'var(--t3)' : (pe.dir === 'over' ? '#30d158' : '#ff453a')}">`
+      + `proj <b>${pe.projK}K</b> vs o${pe.line} (${pe.delta >= 0 ? '+' : ''}${pe.delta})`
+      + (pe.tier !== 'none' ? ` · <b>${pe.edgePts}pt</b> ${pe.dir}` : ' · no edge')
+      + `</div>`
+    : '';
   const hand = sp.hand || '?';
   const handColor = hand === 'L' ? 'var(--r)' : hand === 'R' ? 'var(--bl)' : 'var(--t3)';
   const barColor = kBoardGradientColor(r.score.pct);
@@ -5909,6 +6029,7 @@ function mkKRow(r, rank) {
       <div>K% weighted: <b style="color:var(--t)">${r.score.pK_weighted.toFixed(1)}%</b> · Opp K% vs ${hand}HP: <b style="color:var(--t)">${r.score.oK.toFixed(1)}%</b></div>
       <div>${l3Display}</div>
       <div>Prop: ${propDisplay}</div>
+      ${projHtml}
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       <div style="font-size:22px;font-weight:600;color:${barColor}">${r.score.pct}</div>
@@ -6105,8 +6226,23 @@ function buildRundown() {
   }
 
   // ── Market disagreement ──
-  if (mkts.length) {
-    L.push({ h: 'WHERE THE BOOK DISAGREES' });
+  const edges = kRows.filter(r => { const e = r.proj || (r.proj = kProjEdge(r)); return e && e.tier !== 'none'; });
+  if (edges.length) {
+    L.push({ h: 'EDGE VS THE BOOK' });
+    for (const r of edges.sort((a, b) => b.proj.edgePts - a.proj.edgePts).slice(0, 4)) {
+      const e = r.proj;
+      L.push({ b: `<b>${r.sp.name}</b> — projected <b>${e.projK}K</b> over ${e.expIP} IP (${e.expBF} BF at ${e.kRate}% matchup rate). `
+        + `Book line o${e.line}, delta <b>${e.delta >= 0 ? '+' : ''}${e.delta}</b>. `
+        + `Model ${Math.round(e.modelP * 100)}% ${e.dir} vs book ${Math.round(e.bookP * 100)}% — <b>${e.edgePts} point</b> edge.`
+        + (e.tier === 'absurd' ? ` <i style="color:#ff9f0a">⚠ implausibly large; suspect the projection, not the book</i>`
+          : e.assumedIP ? ` <i style="color:#ff9f0a">⚠ innings assumed</i>`
+          : e.soft ? ` <i style="color:#ff9f0a">⚠ soft inputs</i>` : '') });
+    }
+    L.push({ t: '<i>Strikeouts modelled as Poisson, which is under-dispersed for real K counts — tail probabilities are too confident. Edges above ' + EDGE.strong + ' points deserve scrutiny before trust.</i>' });
+  }
+
+  if (mkts.length && !edges.length) {
+    L.push({ h: 'WHERE THE BOOK DISAGREES (no projection available)' });
     for (const r of mkts.sort((a, b) => b.mkt.strength - a.mkt.strength).slice(0, 4)) {
       const m = r.mkt;
       const tier = m.dir === 'over' ? `below the ${MKT.kHigh} high-line tier` : `above the ${MKT.kLow} low-line tier`;
@@ -6299,6 +6435,165 @@ function tbMarketEdge(pct, ouLine) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ─── K PROJECTION LAYER ────────────────────────────────────────
+// Converts the 0–100 composite into an actual expected strikeout count, which
+// is the only way to compare the model to a posted line. Until now the app
+// could say "the line looks low" but never "we project 9.4 against a 8.5".
+//
+//   projected K = expected batters faced × matchup K rate
+//
+// Both halves are built from data already on the row:
+//   expected BF = expected IP × (3 + WHIP)     — three outs plus baserunners
+//   matchup K%  = Log5 of pitcher K% and opponent K% against league average
+// ═══════════════════════════════════════════════════════════════
+
+const PROJ = {
+  lgK: 22.3,          // league K% — the Log5 pivot
+  defaultIP: 5.2,     // when neither L3 nor season IP/GS is available
+  defaultWHIP: 1.25,
+  ipMin: 3.5, ipMax: 7.5,
+  w_l3: 0.45,         // three starts is recent but small; season carries more weight
+};
+
+// Log5 / odds-ratio: combines two rates against a league baseline. The standard
+// tool for "this pitcher vs this lineup" — a 30% K pitcher against a 27% K lineup
+// projects HIGHER than either alone, which a simple average cannot express.
+function log5(pRate, oRate, lgRate) {
+  const p = pRate / 100, o = oRate / 100, l = lgRate / 100;
+  if (!(p > 0 && p < 1 && o > 0 && o < 1 && l > 0 && l < 1)) return null;
+  const num = (p * o) / l;
+  const den = num + ((1 - p) * (1 - o)) / (1 - l);
+  return den > 0 ? (num / den) * 100 : null;
+}
+
+// Expected innings for this start.
+function expectedIP(sp, l3) {
+  const seasonIP = parseFloat(sp?.ip), gs = parseInt(sp?.gs);
+  const perStart = (Number.isFinite(seasonIP) && Number.isFinite(gs) && gs > 0) ? seasonIP / gs : null;
+  const recent = l3 && Number.isFinite(parseFloat(l3.avg_ip)) ? parseFloat(l3.avg_ip) : null;
+
+  let ip, src;
+  if (recent != null && perStart != null) { ip = recent * PROJ.w_l3 + perStart * (1 - PROJ.w_l3); src = 'L3 + season'; }
+  else if (recent != null)                { ip = recent;    src = 'L3 only'; }
+  else if (perStart != null)              { ip = perStart;  src = 'season only'; }
+  else                                    { ip = PROJ.defaultIP; src = 'league default'; }
+
+  return { ip: Math.max(PROJ.ipMin, Math.min(PROJ.ipMax, ip)), src, assumed: src === 'league default' };
+}
+
+// Full projection for one K Board row.
+function projectK(row) {
+  if (!row || !row.score) return null;
+  const sp = row.sp || {};
+  const kRate = log5(row.score.pK_weighted, row.score.oK, PROJ.lgK);
+  if (kRate == null) return null;
+
+  const e = expectedIP(sp, row.l3);
+  const whip = Number.isFinite(parseFloat(sp.whip)) ? parseFloat(sp.whip) : PROJ.defaultWHIP;
+  const bf = e.ip * (3 + whip);
+  const projK = (kRate / 100) * bf;
+
+  return {
+    projK: R(projK, 1), kRate: R(kRate, 1), expIP: R(e.ip, 1), expBF: Math.round(bf),
+    ipSrc: e.src, assumedIP: e.assumed,
+    // Confidence degrades with assumed innings, thin K samples, or unposted lineups
+    soft: e.assumed || !!row.score.thin || !!row.score.mix.estimated,
+  };
+}
+
+// ─── PROBABILITY ───
+// Poisson is the obvious choice and it is WRONG here. Poisson forces variance to
+// equal the mean, but real start-level strikeout counts are overdispersed —
+// hooks, blowouts, rain, pitch-count limits and short outings all fatten the
+// low tail. Using Poisson makes the model far too confident, which inflates every
+// apparent edge against the book. In testing it turned a 2.4-strikeout
+// disagreement into a 28-point "edge", which is not a real number.
+//
+// Negative binomial with variance = DISPERSION × mean fixes the shape. r = μ/(d−1)
+// gives Var = μ(1 + μ/r) = μ·d. Empirical start-level K variance runs about
+// 1.2–1.3× the mean; 1.25 is the middle of that.
+const DISPERSION = 1.25;
+
+function poissonAtMost(k, lambda) {
+  if (!(lambda > 0) || k < 0) return null;
+  let term = Math.exp(-lambda), sum = term;
+  for (let i = 1; i <= k; i++) { term *= lambda / i; sum += term; }
+  return Math.min(1, sum);
+}
+
+// P(X <= k) for negative binomial with mean mu and variance DISPERSION*mu
+function nbAtMost(k, mu) {
+  if (!(mu > 0) || k < 0) return null;
+  if (DISPERSION <= 1.0001) return poissonAtMost(k, mu);
+  const r = mu / (DISPERSION - 1);
+  const p = r / (r + mu);
+  let term = Math.pow(p, r), sum = term;
+  for (let i = 1; i <= k; i++) { term *= (r + i - 1) / i * (1 - p); sum += term; }
+  return Math.min(1, sum);
+}
+function kAtMost(k, mu) { return nbAtMost(k, mu); }
+
+// P(strikeouts > line). Integer lines can push, so that probability is returned too.
+function pOver(lambda, line) {
+  const f = Math.floor(line);
+  const cdf = kAtMost(f, lambda);
+  if (cdf == null) return null;
+  const isInt = Math.abs(line - Math.round(line)) < 1e-9;
+  if (!isInt) return { p: 1 - cdf, push: 0 };
+  const atLine = cdf - (f > 0 ? kAtMost(f - 1, lambda) : 0);
+  return { p: 1 - cdf, push: atLine };
+}
+
+// The real edge: our probability minus the book's devigged probability.
+// Recalibrated against the negative-binomial output. A 1-strikeout disagreement
+// with the market is already a big claim on a K prop, so the bar sits low: these
+// are percentage points of probability, not strikeouts.
+const EDGE = { flag: 3, strong: 6, absurd: 12 };
+function kProjEdge(row) {
+  const prop = row && row.prop;
+  if (!prop || prop.line == null) return null;
+  const pr = projectK(row);
+  if (!pr) return null;
+  const line = parseFloat(prop.line);
+  if (!Number.isFinite(line)) return null;
+
+  const po = pOver(pr.projK, line);
+  if (!po || po.p == null) return null;
+  const dv = devigOver(prop.overPrice, prop.underPrice);
+  if (dv.p == null) return null;
+  // A one-sided quote still carries the vig, so the book's implied probability is
+  // overstated and our edge against it is understated. Usable, but flagged and
+  // never promoted to the top tier on its own.
+  const oneSided = !dv.fair;
+
+  const modelOver = po.p, bookOver = dv.p;
+  const overEdge = (modelOver - bookOver) * 100;
+  const dir = overEdge >= 0 ? 'over' : 'under';
+  const edgePts = Math.abs(overEdge);
+
+  return {
+    ...pr, line,
+    delta: R(pr.projK - line, 1),
+    modelP: R(dir === 'over' ? modelOver : 1 - modelOver, 3),
+    bookP:  R(dir === 'over' ? bookOver  : 1 - bookOver,  3),
+    edgePts: R(edgePts, 1), dir, fair: dv.fair, push: R(po.push, 3),
+    strength: Math.round(Math.min(100, (edgePts / EDGE.strong) * 70 + (pr.soft ? 0 : 15))),
+    oneSided,
+    tier: edgePts >= EDGE.absurd ? 'absurd'
+        : edgePts >= EDGE.strong ? (oneSided ? 'flag' : 'strong')
+        : edgePts >= EDGE.flag ? 'flag' : 'none',
+  };
+}
+
+// One-line summary used by signals, tooltips and the rundown.
+function kProjLabel(e) {
+  if (!e) return '';
+  return `proj ${e.projK}K vs o${e.line} (${e.delta >= 0 ? '+' : ''}${e.delta}) · `
+    + `model ${Math.round(e.modelP * 100)}% ${e.dir} vs book ${Math.round(e.bookP * 100)}% `
+    + `= ${e.edgePts >= 0 ? '+' : ''}${e.edgePts} pts`;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ─── OVERVIEW (landing view) ───────────────────────────────────
 // Glance-first surface. Three blocks: Top Signals (tails of every
 // module), K Scatter (absolute axes), TB Lineup bars. Nothing here
@@ -6386,14 +6681,36 @@ function buildTopSignals(kRows, tbRows) {
   // Emitted separately from the raw model signal because it answers a different
   // question: not "is this a good matchup" but "has the book already priced it".
   for (const r of (kRows || [])) {
-    const m = r.mkt || kMarketEdge(r.score.pct, r.prop);
+    // Prefer the real probability edge. Fall back to the coarse tier heuristic only
+    // when a projection isn't possible (no two-sided prices, no line).
+    const e = r.proj || (r.proj = kProjEdge(r));
+    if (e && e.tier !== 'none') {
+      sigs.push({
+        kind: e.dir === 'over' ? 'EDGE OVER' : 'EDGE UNDER',
+        col: e.dir === 'over' ? '#30d158' : '#ff453a', icon: '◆',
+        title: (r.sp.name || 'TBD'),
+        sub: `vs ${r.oppAbbr} · ${e.edgePts} pt edge`,
+        why: kProjLabel(e) + ` · ${e.expIP} IP est (${e.ipSrc})`,
+        pct: e.strength,
+        badge: e.tier === 'absurd'
+                 ? confBadge('thin', `${e.edgePts}-point edge is larger than this model can credibly produce — more likely a projection error than a real edge`)
+             : e.assumedIP ? confBadge('est', 'No innings data — projection uses a league-default start length')
+             : e.oneSided  ? confBadge('noline', 'Only one side quoted — the vig is still in the book number, so this edge is understated')
+             : e.soft      ? confBadge('thin', 'Thin sample or unposted lineup feeding the projection')
+             : '',
+        go: () => drillTo('boards', { bbSub: 'k', highlight: r.spId }),
+      });
+      continue;
+    }
+    const m = r.mkt || (r.mkt = kMarketEdge(r.score.pct, r.prop));
     if (!m || m.strength < 45) continue;
     sigs.push({
       kind: m.dir === 'over' ? 'MKT OVER' : 'MKT UNDER',
       col: m.dir === 'over' ? '#30d158' : '#ff453a', icon: '⚖',
       title: (r.sp.name || 'TBD'),
       sub: `vs ${r.oppAbbr} · o${m.line}`,
-      why: m.label + (m.pSide != null ? ` · book implies ${Math.round(m.pSide * 100)}%${m.fair ? ' (devigged)' : ' (one-sided)'}` : ' · no prices'),
+      why: m.label + (m.pSide != null ? ` · book implies ${Math.round(m.pSide * 100)}%${m.fair ? ' (devigged)' : ' (one-sided)'}` : ' · no prices')
+         + ' · tier heuristic, no projection available',
       pct: m.strength,
       badge: !m.fair ? confBadge('noline', 'Only one side quoted — implied probability still carries the vig') : '',
       go: () => drillTo('boards', { bbSub: 'k', highlight: r.spId }),
@@ -6510,7 +6827,13 @@ function renderKScatter(rows) {
   const nNoL3 = rows.filter(r => !r.score.hasL3).length;
   const allEst  = nEst  === rows.length;
   const allNoL3 = nNoL3 === rows.length;
-  const nRing = rows.filter(r => { const m = r.mkt || kMarketEdge(r.score.pct, r.prop); return m && m.strength >= 45; }).length;
+  const nRing = rows.filter(r => {
+    const pe = r.proj || (r.proj = kProjEdge(r));
+    if (pe) return pe.tier !== 'none';
+    const m = r.mkt || (r.mkt = kMarketEdge(r.score.pct, r.prop));
+    return m && m.strength >= 45;
+  }).length;
+  const nProj = rows.filter(r => r.proj).length;
 
   const dots = rows.map(r => {
     const cx = x(r.score.pK_weighted), cy = y(r.score.oK);
@@ -6520,10 +6843,13 @@ function renderKScatter(rows) {
     const fEst  = r.score.mix.estimated && !allEst;   // amber  — lineup not posted
     const fNoL3 = !r.score.hasL3        && !allNoL3;  // slate  — no L3 workload log
     const line = r.prop && r.prop.line != null ? `o${r.prop.line}` : 'no line';
-    const mkt = r.mkt || kMarketEdge(r.score.pct, r.prop);
-    const ringCol = mkt && mkt.strength >= 45 ? (mkt.dir === 'over' ? '#30d158' : '#ff453a') : null;
+    const pe  = r.proj || (r.proj = kProjEdge(r));
+    const mkt = r.mkt  || (r.mkt  = kMarketEdge(r.score.pct, r.prop));
+    const live = (pe && pe.tier !== 'none') ? { dir: pe.dir } : (mkt && mkt.strength >= 45 ? { dir: mkt.dir } : null);
+    const ringCol = live ? (live.dir === 'over' ? '#30d158' : '#ff453a') : null;
     const notes = [];
-    if (mkt && mkt.strength >= 45) notes.push('market: ' + mkt.label);
+    if (pe) notes.push(kProjLabel(pe));
+    else if (mkt && mkt.strength >= 45) notes.push('market: ' + mkt.label);
     if (r.score.mix.estimated) notes.push('lineup not posted — league-average L/R mix');
     if (!r.score.hasL3)        notes.push('no L3 log — workload bonus not applied');
     if (r.score.thin)          notes.push('small sample — K% regressed toward league mean');
@@ -6555,7 +6881,7 @@ Composite ${r.score.pct} · Prop ${line}${notes.length ? '\n⚠ ' + notes.join('
       ${allNoL3 ? '<span><b style="color:var(--t3)">No L3 logs on this slate</b> — workload bonus off for everyone</span>'
                 : (nNoL3 ? `<span><span class="ks-key" style="background:var(--t3)"></span>no L3 log (${nNoL3})</span>` : '')}
       ${(!nEst && !nNoL3) ? '<span style="color:var(--t3)">All starters on real lineup + workload data</span>' : ''}
-      ${nRing ? `<span><span class="ks-ring"></span>book disagrees with model (${nRing}) — directional flag, not +EV</span>` : ''}
+      ${nRing ? `<span><span class="ks-ring"></span>edge vs book (${nRing})${nProj ? '' : ' — tier heuristic only, no projection'}</span>` : ''}
     </div>
   </div>`;
 }
@@ -6611,6 +6937,9 @@ function renderOverview() {
   if (!BB.l3Loaded && !BB.l3Loading && gs.length) {
     fetchL3Logs().then(() => { if (S.view === 'overview') renderOverview(); });
   }
+  if (!PR.loaded && !PR.loading && gs.length) {
+    fetchPriorSeasons().then(() => { if (S.view === 'overview') renderOverview(); });
+  }
 
   // ── Top Signals ──
   const sigBody = sigs.length
@@ -6643,6 +6972,13 @@ function renderOverview() {
   }
   if (tb.mins && tb.mins.scaled) {
     notes.push(`Early season: sample minimums scaled to <b>${tb.mins.batterPA} PA / ${tb.mins.pitcherIP} IP</b> (full-season gates are 50/20). Low-sample rates are regressed toward league mean.`);
+  }
+  if (PR.loaded && !PR.skipped) {
+    const pc = priorCoverage(kRows);
+    if (pc.total && pc.withPrior < pc.total)
+      notes.push(`${pc.withPrior}/${pc.total} starters shrink toward their own prior-season K%; the rest use the ${LEAGUE_MEAN.pK}% league mean (no qualifying prior year).`);
+  } else if (PR.skipped) {
+    notes.push(`Prior-season priors not needed — ${PR.skipped}.`);
   }
   if (!S.oddsOk) notes.push(`Odds unavailable — prop lines not shown`);
   const banner = notes.length
