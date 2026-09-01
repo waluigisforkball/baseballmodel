@@ -4914,6 +4914,7 @@ expected IP = 0.45 × L3 IP/start + 0.55 × season IP/start &nbsp;(clamped 3.5�
 matchup K% = Log5(pitcher K%, opponent K%, league 22.3%)</p>
 <p><b>Log5</b> is the standard odds-ratio matchup formula — a 31% K pitcher against a 26% K lineup projects <b>36%</b>, higher than either input, which a simple average cannot express. <b>BF from WHIP</b> rather than a flat 4.2 per inning, because a pitcher who allows more baserunners faces more hitters.</p>
 <p style="margin-top:8px">Probability comes from a <b>negative binomial</b>, not Poisson. Poisson forces variance to equal the mean, but real start-level K counts are overdispersed (hooks, blowouts, pitch limits fatten the low tail), which made the model far too confident and inflated every apparent edge. Dispersion is set to <b>1.25×</b> the mean. The edge shown is <b>your probability minus the book's devigged probability, in percentage points</b>: flag at ${'3'}, strong at ${'6'}, and above ${'12'} it is labelled implausible — at that size suspect the projection before you suspect the book.</p>
+<p style="margin-top:8px"><b style="color:var(--t)">Innings-source disagreement.</b> Expected innings blends the last 3 starts with the season average. When those two disagree by <b>1.0 IP or more</b> the blend is not trustworthy — splitting the difference between 4.2 and 5.8 is a coin flip, not an estimate. The app flags these and shows the projection range implied by each source. In testing, the only pitcher on a slate whose sources disagreed sharply was also the only one flagged as a big edge, which is the pattern to watch for: the "edge" is often the uncertainty, not a read on the pitcher.</p>
 <p style="margin-top:8px"><b style="color:#ff9f0a">Read the edge with suspicion.</b> It is highly sensitive to the projection: a one-strikeout projection error produces roughly an 8-point swing. Against realistic starter profiles the model lands within about half a strikeout of typical posted lines, so genuine edges should be small and rare. A large one usually means an input is wrong — check the innings estimate and the lineup badge first.</p>
 <p style="margin-top:8px"><b style="color:#ff9f0a">The ⚖ tier heuristic is the fallback, not +EV.</b> It says the book looks low on a pitcher the model likes. It cannot tell you a bet is profitable — that needs P(over 6.5), which needs a projection layer the app does not have yet. The <b>MKT TOTAL</b> signal on the TB side is weaker still: a game total prices both lineups and both pitchers, so a strong lineup can sit in a low-total game just because the other side is dead. Held to a higher bar and labelled as a hint.</p>
 <p style="margin-top:8px">Both boards show the posted prop line next to the model score. <b style="color:var(--t)">The app does not yet compute a true model-vs-line delta</b> — the model outputs a 0–100 score and the line is a strikeout or total-base count, which are different units. Comparing them is currently your eye's job. A projection layer that makes a true delta possible is the next phase.</p>`
@@ -6256,10 +6257,14 @@ function buildRundown() {
         audit: `innings: L3 ${a.l3IP ?? '—'} / season ${a.seasonIP ?? '—'} → ${e.expIP} (${e.ipSrc}) · `
              + `rate: his ${a.pK ?? '—'}% vs their ${a.oK ?? '—'}% → ${e.kRate}%`
              + (a.priorK != null ? ` · prior-yr ${a.priorK}%` : '') + ` · WHIP ${a.whip ?? '—'}`,
-        warn: e.tier === 'absurd' ? `We and the book are over ${IMPLAUSIBLE_K} strikeouts apart, which is a lot. Check the innings line above before trusting this — a wrong innings estimate is the usual cause.`
-            : e.assumedIP ? 'No innings data for this pitcher — using a league-default start length'
-            : e.oneSided ? 'Only one side quoted, so the vig is still in the book number'
-            : e.soft ? 'Thin sample or unposted lineup feeding this' : '' });
+        warn: [
+          e.splitRisk ? `His last 3 starts (${a.l3IP} IP) and his season average (${a.seasonIP} IP) disagree by ${e.ipSpread} innings, so the ${e.expIP} we used is a coin flip between them. Believe the short number and we project ${e.projLo}K; believe the long one and it is ${e.projHi}K. Most of this "edge" is that uncertainty, not a read on the pitcher.` : '',
+          e.tier === 'absurd' && !e.splitRisk ? `We and the book are over ${IMPLAUSIBLE_K} strikeouts apart, which is a lot. Check the innings line above first — a wrong innings estimate is the usual cause.` : '',
+          e.assumedIP ? 'No innings data for this pitcher — using a league-default start length' : '',
+          e.oneSided ? 'Only one side quoted, so the vig is still in the book number' : '',
+          r.score.mix.estimated ? 'Lineup not posted — the opponent K% here is a league-average estimate and will move' : '',
+          r.score.thin ? 'Small sample on this pitcher — his K% is regressed toward the league mean' : '',
+        ].filter(Boolean).join(' ') });
     }
     L.push({ t: `<i>The "pt" figure is how much more likely we think the bet is than the book does. It looks dramatic because small strikeout differences swing probability hard — half a strikeout is worth roughly 8 points. The strikeout gap on each line is the number to trust; anything under ${IMPLAUSIBLE_K} apart is ordinary disagreement.</i>` });
   }
@@ -6501,6 +6506,7 @@ const PROJ = {
   ipMin: 3.5, ipMax: 7.5,
   w_l3: 0.45,         // three starts is recent but small; season carries more weight
   extraBF: 0.06,      // HBP + reached-on-error + sac, per IP — not captured by WHIP
+  ipSplitWarn: 1.0,   // L3 vs season gap (IP) beyond which the blend is not trustworthy
 };
 
 // Log5 / odds-ratio: combines two rates against a league baseline. The standard
@@ -6546,9 +6552,18 @@ function projectK(row) {
   const bf = e.ip * (3 + whip + PROJ.extraBF);
   const projK = (kRate / 100) * bf;
 
+  // Range implied by the two innings sources, when they disagree enough to matter.
+  const perBF = (3 + whip + PROJ.extraBF);
+  const ipSpread = (e.recentIP != null && e.seasonIP != null) ? Math.abs(e.recentIP - e.seasonIP) : null;
+  const splitRisk = ipSpread != null && ipSpread >= PROJ.ipSplitWarn;
+  const kFrom = ip => R((kRate / 100) * ip * perBF, 1);
+  const projLo = splitRisk ? kFrom(Math.min(e.recentIP, e.seasonIP)) : null;
+  const projHi = splitRisk ? kFrom(Math.max(e.recentIP, e.seasonIP)) : null;
+
   return {
     projK: R(projK, 1), kRate: R(kRate, 1), expIP: R(e.ip, 1), expBF: Math.round(bf),
     ipSrc: e.src, assumedIP: e.assumed,
+    ipSpread: ipSpread != null ? R(ipSpread, 1) : null, splitRisk, projLo, projHi,
     // Audit trail — every input that went into projK, so a wrong number can be
     // traced to the term responsible instead of inferred from the output.
     audit: {
@@ -6557,7 +6572,7 @@ function projectK(row) {
       priorK: row.score.priorUsed ?? null,
     },
     // Confidence degrades with assumed innings, thin K samples, or unposted lineups
-    soft: e.assumed || !!row.score.thin || !!row.score.mix.estimated,
+    soft: e.assumed || !!row.score.thin || !!row.score.mix.estimated || splitRisk,
   };
 }
 
