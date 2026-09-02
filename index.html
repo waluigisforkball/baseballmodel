@@ -1236,6 +1236,14 @@ function shiftDay(d) {
 async function load(date, asOf = null) {
   if (S.loading) return;
   S.asOf = asOf;
+  // load() did NOT own S.date — callers set it first and then called load(S.date),
+  // so the two agreed by convention. The backfill calls load() directly, which left
+  // S.date pointing at today while the pipeline fetched a past slate. Everything
+  // keyed on S.date then used the wrong date: the L3 cache never invalidated between
+  // backfill dates, `beforeDate` was sent as today (so the game-log filter allowed a
+  // week of future starts through), and the YRFI window ended yesterday rather than
+  // the day before the target. The as-of assertion caught it; this is the cause.
+  S.date = date;
   S.loading = true; S.aiDone.clear(); S.oddsOk = false;
   setStatus('spin', 'Loading ' + fmtDate(date) + '…');
   showEl('emptyState', false); showEl('slateView', false);
