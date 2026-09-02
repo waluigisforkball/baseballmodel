@@ -1057,6 +1057,9 @@ const TEAM_MAP = {
 // ─── STATE ───
 const S = {
   date:'', statsStart:'', statsEnd:'', days:30, oddsWt:30,
+  // null = live. A date string = reconstructing what was knowable that evening.
+  // Set unconditionally at the top of load(), so it cannot survive a run.
+  asOf: null,
   games:[], view:'overview', filter:'all',
   sort:{ col:'comp', dir:'desc' },
   loading:false, aiDone:new Set(), oddsOk:false, activePreset:'30',
@@ -1225,8 +1228,14 @@ function shiftDay(d) {
 // ─────────────────────────────────────────────────────────────
 // MAIN PIPELINE
 // ─────────────────────────────────────────────────────────────
-async function load(date) {
+// asOf is the single switch between live and backfill. It is set here on EVERY
+// call — null for normal use — so a backfill can never leave it set and poison a
+// subsequent live load. Everything downstream reads S.asOf rather than taking a
+// parameter, which keeps the diff small; the cost is that this assignment is
+// load-bearing and must stay unconditional.
+async function load(date, asOf = null) {
   if (S.loading) return;
+  S.asOf = asOf;
   S.loading = true; S.aiDone.clear(); S.oddsOk = false;
   setStatus('spin', 'Loading ' + fmtDate(date) + '…');
   showEl('emptyState', false); showEl('slateView', false);
@@ -1248,15 +1257,22 @@ async function load(date) {
     setStatus('spin', raw.length + ' games — fetching pitcher details…');
     await enrichPitchers(raw);
     setStatus('spin', 'Fetching season stats…');
-    await fetchStats(raw, date);
-    setStatus('spin', 'Fetching weather…');
-    await fetchWeather(raw);
-    setStatus('spin', 'Fetching live odds…');
-    await fetchOdds(raw);
-    // Compute odds-based boosts after odds are loaded
-    computeOddsBoosts(raw);
-    setStatus('spin', 'Fetching player props (K, TB, HR)…');
-    await fetchAllPlayerProps(raw);
+    await fetchStats(raw, date, asOf);
+    // Weather, odds and props are skipped on backfill. Open-Meteo's forecast
+    // endpoint answers for TODAY whatever date you ask about, and The Odds API
+    // serves history only on paid plans — so all three would return present-day
+    // values dressed as past ones. Weather is not an input to the pitcher or
+    // first-inning models, and market columns are documented as NULL on
+    // backfilled rows. Skipping is both correct and much faster.
+    if (!asOf) {
+      setStatus('spin', 'Fetching weather…');
+      await fetchWeather(raw);
+      setStatus('spin', 'Fetching live odds…');
+      await fetchOdds(raw);
+      computeOddsBoosts(raw);
+      setStatus('spin', 'Fetching player props (K, TB, HR)…');
+      await fetchAllPlayerProps(raw);
+    }
     setStatus('spin', 'Computing 1st inning run likelihood…');
     await fetchYRFI(raw);
     setStatus('spin', 'Fetching injury report…');
@@ -1285,8 +1301,12 @@ async function load(date) {
     // meant every logged row would have claimed L3 was unavailable — false, and
     // undetectable from the output.
     await fetchL3Logs();
-    FL.onSlateLoaded(date);   // fire-and-forget; wrapped, cannot break the app
-    FL.settleOpen();          // fill in outcomes for earlier dates
+    if (!asOf) {
+      FL.onSlateLoaded(date);   // fire-and-forget; wrapped, cannot break the app
+      FL.settleOpen();          // fill in outcomes for earlier dates
+    }
+    // On a backfill the runner logs explicitly after this returns, so it can
+    // check parity and surface failures instead of swallowing them.
   } catch(e) {
     console.error(e); showError('Load Failed', e.message||'Unknown error');
     setStatus('err', 'Error: '+(e.message||'Load failed'));
@@ -1389,7 +1409,12 @@ async function enrichPitchers(games) {
   if (allBatterIds.length) {
     try {
       const season = activeStatsSeason(S.date || todayISO());
-      const hydrate = encodeURIComponent(`stats(group=[hitting],type=[season],season=${season})`);
+      // Sixth as-of site. Not in the original inventory of five, but this is the
+      // path that fills b.slg for CONFIRMED lineups — the estimate path below is
+      // a different one. Both feed TB.
+      const hydrate = encodeURIComponent(S.asOf
+        ? `stats(group=[hitting],type=[byDateRange],season=${season},startDate=03/01/${season},endDate=${mmddyyyy(S.asOf)})`
+        : `stats(group=[hitting],type=[season],season=${season})`);
       // MLB caps URL length; chunk to ~80 IDs per call to be safe
       const handMapB = {}, statsMapB = {};
       const chunks = [];
@@ -1475,7 +1500,7 @@ async function fetchRosterEstimate(g, side) {
       if (!pid) return null;
       try {
         const sd = await proxyFetch(
-          `${MLB_BASE}/people/${pid}/stats?stats=season&season=${statsSeason}&group=hitting&sportId=1`
+          statURL('people', pid, 'hitting', statsSeason, S.asOf)
         );
         const splits = sd?.stats?.[0]?.splits;
         const st = splits?.[splits.length-1]?.stat || {};
@@ -1569,6 +1594,23 @@ async function fetchRosterEstimate(g, side) {
 }
 
 // ─── STATS ───
+// As-of stat URLs. `stats=season` always means "through today", which is exactly
+// the wrong thing when reconstructing what was knowable on a past date. MLB's
+// byDateRange accepts MM/DD/YYYY and genuinely honours endDate (verified: 2,686
+// team AB bounded to 07/01 vs 4,592 unbounded).
+//
+// asOf === null is the live path and produces the original URL byte-for-byte.
+// Anything else is the backfill path. There is no third case.
+const mmddyyyy = (iso) => `${iso.slice(5,7)}/${iso.slice(8,10)}/${iso.slice(0,4)}`;
+
+function statURL(scope, id, group, season, asOf) {
+  const base = `${MLB_BASE}/${scope}/${id}/stats`;
+  if (!asOf) return `${base}?stats=season&season=${season}&group=${group}&sportId=1`;
+  // Season opens late March; 03/01 is safely before any regular-season game.
+  return `${base}?stats=byDateRange&season=${season}&group=${group}&sportId=1`
+       + `&startDate=03/01/${season}&endDate=${mmddyyyy(asOf)}`;
+}
+
 // Returns the most recent MLB season that has stats data
 // MLB season typically runs April-October; 2026 season won't have data until April 2026
 function activeStatsSeason(dateStr) {
@@ -1591,24 +1633,24 @@ function seasonLabel(dateStr) {
   return season + ' season (current)';
 }
 
-async function fetchStats(games, date) {
+async function fetchStats(games, date, asOf = null) {
   const season = activeStatsSeason(date);
-  console.log('Fetching stats for season:', season);
+  console.log('Fetching stats for season:', season, asOf ? '· as of ' + asOf : '');
   await Promise.allSettled(games.flatMap(g => [
-    fetchPStat(g.asp, g.away_sp_id, season),
-    fetchPStat(g.hsp, g.home_sp_id, season),
-    fetchTStat(g, 'at', g.away_id, season),
-    fetchTStat(g, 'ht', g.home_id, season),
-    fetchBullpen(g, 'away_bp', g.away_id, season),
-    fetchBullpen(g, 'home_bp', g.home_id, season),
+    fetchPStat(g.asp, g.away_sp_id, season, asOf),
+    fetchPStat(g.hsp, g.home_sp_id, season, asOf),
+    fetchTStat(g, 'at', g.away_id, season, asOf),
+    fetchTStat(g, 'ht', g.home_id, season, asOf),
+    fetchBullpen(g, 'away_bp', g.away_id, season, asOf),
+    fetchBullpen(g, 'home_bp', g.home_id, season, asOf),
   ]));
 }
 
-async function fetchBullpen(g, key, tid, season) {
+async function fetchBullpen(g, key, tid, season, asOf = null) {
   if (!tid) return;
   try {
     // Fetch team pitching stats then subtract the starter's numbers for a bullpen proxy
-    const d = await proxyFetch(`${MLB_BASE}/teams/${tid}/stats?stats=season&season=${season}&group=pitching&sportId=1`);
+    const d = await proxyFetch(statURL('teams', tid, 'pitching', season, asOf));
     const st = d?.stats?.[0]?.splits?.[0]?.stat; if (!st) return;
     const ip   = parseFloat(st.inningsPitched)||1;
     const so   = parseInt(st.strikeOuts)||0;
@@ -1631,10 +1673,10 @@ async function fetchBullpen(g, key, tid, season) {
     };
   } catch {}
 }
-async function fetchPStat(sp, pid, season) {
+async function fetchPStat(sp, pid, season, asOf = null) {
   if (!pid) return;
   try {
-    const d  = await proxyFetch(`${MLB_BASE}/people/${pid}/stats?stats=season&season=${season}&group=pitching&sportId=1`);
+    const d  = await proxyFetch(statURL('people', pid, 'pitching', season, asOf));
     const st = d?.stats?.[0]?.splits?.[0]?.stat; if (!st) return;
     const ip = parseFloat(st.inningsPitched)||1;
     const bf = parseInt(st.battersFaced)||Math.round(ip*4.2);
@@ -1649,10 +1691,10 @@ async function fetchPStat(sp, pid, season) {
     sp.bb_pct=bf>0 ? R(bb/bf*100,1) : null;
   } catch {}
 }
-async function fetchTStat(g, key, tid, season) {
+async function fetchTStat(g, key, tid, season, asOf = null) {
   if (!tid) return;
   try {
-    const d  = await proxyFetch(`${MLB_BASE}/teams/${tid}/stats?stats=season&season=${season}&group=hitting&sportId=1`);
+    const d  = await proxyFetch(statURL('teams', tid, 'hitting', season, asOf));
     const st = d?.stats?.[0]?.splits?.[0]?.stat; if (!st) return;
     const pa = parseInt(st.plateAppearances)||1;
     const so = parseInt(st.strikeOuts)||0, bb = parseInt(st.baseOnBalls)||0;
@@ -1863,7 +1905,10 @@ function renderInjuryStrip() {
 // ─────────────────────────────────────────────────────────────
 async function fetchYRFI(games) {
   const LOOKBACK_DAYS = 20;
-  const endDate = S.date || todayISO();
+  // Ends the day BEFORE the slate, always. On a live load this changes nothing —
+  // today's games have no linescore yet — but on a backfill the old version pulled
+  // the target date's own first innings into the input that predicts them.
+  const endDate = addDays(S.date || todayISO(), -1);
   const startDate = addDays(endDate, -LOOKBACK_DAYS);
 
   // Fetch one team's recent schedule with linescores.
@@ -1979,6 +2024,9 @@ async function fetchYRFI(games) {
     const hspId = g.home_sp_id;
 
     g.yrfi = {
+      // Raw 0..1 inputs, kept so the Worker can re-score this game from features
+      // rather than the app shipping it a finished answer.
+      offAway, offHome, vulnAway, vulnHome,
       pct:          Math.round(gameYRFI * 100),
       awayPct:      Math.round(yrfiAway * 100),
       homePct:      Math.round(yrfiHome * 100),
@@ -6004,8 +6052,14 @@ async function fetchL3Logs() {
       body: JSON.stringify({
         action: 'pitcher-gamelog',
         playerIds: [...new Set(ids)],
-        season: new Date().getFullYear(),
+        // Season follows the slate, not the wall clock — a 2026 date opened in
+        // 2027 must not request 2027 game logs.
+        season: parseInt((S.date || todayISO()).slice(0, 4)),
         lastN: 5,
+        // The Worker filters to starts STRICTLY before this date. On a live load
+        // it is null and behaviour is unchanged; on a backfill it is the firewall
+        // that keeps the target date's own start out of its own L3 average.
+        beforeDate: S.asOf ? (S.date || todayISO()) : null,
       }),
     });
     if (r.ok) {
@@ -7401,6 +7455,172 @@ const FL = {
     }
     return null;
   },
+
+  // First-inning features. The app already computed these during fetchYRFI; this
+  // hands the Worker the raw 0..1 inputs so the Worker scores them itself, rather
+  // than the app shipping a finished answer that nothing can check.
+  buildGameFeatures() {
+    const out = [];
+    for (const g of S.games) {
+      const y = g.yrfi;
+      if (!y || y.offAway == null) continue;
+      out.push({
+        gameId: g.game_id, away: g.away_abbr || g.away, home: g.home_abbr || g.home,
+        awaySpId: g.away_sp_id || null, homeSpId: g.home_sp_id || null,
+        offAway: y.offAway, offHome: y.offHome, vulnAway: y.vulnAway, vulnHome: y.vulnHome,
+        awayFromData: y.awayFromData, homeFromData: y.homeFromData,
+        parkRun: g.park?.run ?? null,
+        tempF: g.wx?.tempF ?? null, weff: g.wx?.windEff ?? null, dome: !!g.wx?.dome,
+        mktLine: null, mktOverPx: null, mktUnderPx: null, mktDevigProb: null,
+        _localYrfi: y.pct,
+      });
+    }
+    return out;
+  },
+
+  // The YRFI parity check. Pitchers already had one; this closes half the gap
+  // that let the app and Worker disagree on ANCHOR.tbRaw without complaint.
+  checkGameParity(sent, returned) {
+    const local = {};
+    for (const g of sent) local[g.gameId] = g._localYrfi;
+    const bad = [];
+    for (const row of returned) {
+      const a = local[row.game_id], b = row.yrfi_pct;
+      if (a == null || b == null) continue;
+      if (Math.abs(a - b) > 0.5) bad.push({ gameId: row.game_id, app: a, worker: b });
+    }
+    return bad;
+  },
+
+  // ── Backfill ──
+  // Browser-orchestrated, one date per iteration. Fetching and parsing stay here
+  // because a date is ~2MB of JSON and the Worker has ~10ms of CPU; it only scores
+  // the slimmed feature payload and writes to D1.
+  //
+  // Resumable by construction: every write is an upsert keyed on
+  // (date, id, lineup_source, model_version), and settled outcomes are protected
+  // from being overwritten. Re-running a date is free and idempotent.
+
+  bfStop: false,
+
+  // Verify the as-of URL shapes return real data BEFORE spending 30 dates on them.
+  // byDateRange is confirmed on /teams; /people is the same endpoint family but was
+  // never actually tested, and a silent empty response there would produce 900 rows
+  // of league-default projections that look like a working model.
+  async preflight() {
+    const today = todayISO();
+    const asOf  = addDays(today, -8);
+    const season = activeStatsSeason(asOf);
+    const g = S.games?.[0];
+    if (!g) return { ok: false, why: 'Load a slate first — preflight needs a real pitcher and team id.' };
+
+    const checks = [];
+    const probe = async (label, url, pick) => {
+      try {
+        const d = await proxyFetch(url);
+        const v = pick(d);
+        checks.push({ label, ok: v != null && v !== '', value: v ?? null });
+      } catch (e) { checks.push({ label, ok: false, value: 'ERR ' + e.message }); }
+    };
+
+    const stat = d => d?.stats?.[0]?.splits?.[0]?.stat;
+    await probe('pitcher byDateRange', statURL('people', g.away_sp_id, 'pitching', season, asOf),
+      d => stat(d)?.inningsPitched);
+    await probe('team hitting byDateRange', statURL('teams', g.away_id, 'hitting', season, asOf),
+      d => stat(d)?.plateAppearances);
+    await probe('team pitching byDateRange', statURL('teams', g.away_id, 'pitching', season, asOf),
+      d => stat(d)?.inningsPitched);
+
+    // The bounded number must be SMALLER than the unbounded one. Equal means the
+    // date range was accepted and then ignored, which is the failure that looks
+    // exactly like success.
+    try {
+      const [bounded, full] = await Promise.all([
+        proxyFetch(statURL('people', g.away_sp_id, 'pitching', season, asOf)),
+        proxyFetch(statURL('people', g.away_sp_id, 'pitching', season, null)),
+      ]);
+      const bIP = parseFloat(stat(bounded)?.inningsPitched);
+      const fIP = parseFloat(stat(full)?.inningsPitched);
+      checks.push({
+        label: 'endDate actually honoured', ok: Number.isFinite(bIP) && Number.isFinite(fIP) && bIP < fIP,
+        value: `${bIP} IP as-of vs ${fIP} IP full`,
+      });
+    } catch (e) { checks.push({ label: 'endDate actually honoured', ok: false, value: 'ERR ' + e.message }); }
+
+    const ok = checks.every(c => c.ok);
+    console.table(checks);
+    return { ok, checks, why: ok ? null : 'One or more as-of probes failed — see table above.' };
+  },
+
+  async backfill(days = 30, { dryRun = false } = {}) {
+    if (!this.isAdmin()) { console.warn('[FL] locked — click the log badge to unlock'); return; }
+    this.bfStop = false;
+
+    const pre = await this.preflight();
+    if (!pre.ok) { console.error('[FL] preflight failed, nothing run.', pre.why); this.badge('preflight failed', '#ff453a'); return; }
+    console.log('[FL] preflight passed' + (dryRun ? ' · DRY RUN, nothing will be written' : ''));
+
+    const summary = [];
+    // Start at yesterday: today has no outcomes and is already forward-logged.
+    for (let i = 1; i <= days; i++) {
+      if (this.bfStop) { console.warn('[FL] stopped by user at day ' + i); break; }
+      const date = addDays(todayISO(), -i);
+      const asOf = addDays(date, -1);
+      this.badge(`backfill ${i}/${days} · ${date}`, '#bf5af2');
+
+      try {
+        await load(date, asOf);
+        if (!S.games.length) { summary.push({ date, pitchers: 0, games: 0, note: 'no games' }); continue; }
+
+        const pitchers = this.buildPitcherFeatures().map(p => ({ ...p, asOf }));
+        const games    = this.buildGameFeatures().map(g => ({ ...g, asOf }));
+        if (!pitchers.length && !games.length) { summary.push({ date, pitchers: 0, games: 0, note: 'no rows' }); continue; }
+
+        // isBackfill:1 turns on the Worker's as-of assertions. They THROW. A leak
+        // must fail loudly here rather than quietly produce confident garbage.
+        const scored = await this.call('score-date', {
+          date, isBackfill: 1, lineupSource: 'real', wxSource: 'none',
+          features: { pitchers, games },
+        });
+
+        const drift = [
+          ...this.checkParity(pitchers, scored.pitchers || []),
+          ...this.checkGameParity(games, scored.games || []),
+        ];
+        if (drift.length) {
+          console.error(`[FL] DRIFT on ${date} — nothing logged for this date.`, drift);
+          summary.push({ date, pitchers: 0, games: 0, note: 'DRIFT — skipped' });
+          continue;
+        }
+
+        if (!dryRun) {
+          await this.call('log-predictions', { rows: { pitchers: scored.pitchers, games: scored.games } });
+        }
+        summary.push({ date, pitchers: (scored.pitchers || []).length, games: (scored.games || []).length, note: dryRun ? 'dry run' : 'written' });
+        console.log(`[FL] ${date}: ${(scored.pitchers||[]).length}p ${(scored.games||[]).length}g${dryRun ? ' (dry)' : ''}`);
+      } catch (e) {
+        // One bad date must not end the run. Re-running later fixes it for free.
+        console.warn(`[FL] ${date} failed: ${e.message}`);
+        summary.push({ date, pitchers: 0, games: 0, note: 'ERR ' + e.message.slice(0, 60) });
+      }
+
+      // MLB is cached and cheap, but rapid date-flipping earned 429s from other
+      // hosts during testing. A second between dates costs 30s over a full run.
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    console.table(summary);
+    const tot = summary.reduce((a, s) => ({ p: a.p + s.pitchers, g: a.g + s.games }), { p: 0, g: 0 });
+    console.log(`[FL] backfill done — ${tot.p} pitcher rows, ${tot.g} game rows`);
+    this.badge(`backfill done ${tot.p}p/${tot.g}g`, '#00c97a');
+
+    // Return to today so the app is not left sitting on a stale slate with
+    // S.asOf semantics in the user's head.
+    await load(todayISO());
+    return summary;
+  },
+
+  stopBackfill() { this.bfStop = true; console.log('[FL] stop requested — will halt after the current date'); },
 
   // ── Minimal status affordance ──
   badge(txt, color) {
