@@ -7399,8 +7399,9 @@ const FL = {
     if (!this.isAdmin()) return;
     try {
       const un = await this.call('fetch-unsettled', { beforeDate: todayISO(), limit: 300 });
-      const rows = un.rows?.pitchers || [];
-      if (!rows.length) return;
+      const rows     = un.rows?.pitchers || [];
+      const gameRows = un.rows?.games    || [];
+      if (!rows.length && !gameRows.length) return;
 
       const byGame = {};
       for (const r of rows) (byGame[r.game_id] = byGame[r.game_id] || []).push(r);
@@ -7409,15 +7410,49 @@ const FL = {
       // UTC, so an evening load here sees "tomorrow" and would otherwise go
       // settling games still in the fourth inning — recording partial strikeouts
       // as final and marking the row done forever. Check status per date first.
-      const final = {};
-      for (const d of [...new Set(rows.map(r => r.date))]) {
+      //
+      // hydrate=linescore rides along on this same call, so first-inning outcomes
+      // for pred_game cost zero additional requests.
+      const final    = {};
+      const lineFirst = {};   // gamePk → { away, home } runs in inning 1
+      const hydrateOK = {};   // date → did ANY game come back with a linescore
+      for (const d of [...new Set([...rows, ...gameRows].map(r => r.date))]) {
         try {
-          const sc = await proxyFetch(`${MLB_BASE}/schedule?sportId=1&date=${d}`);
-          for (const g of (sc?.dates?.[0]?.games || [])) {
+          const sc = await proxyFetch(`${MLB_BASE}/schedule?sportId=1&date=${d}&hydrate=linescore`);
+          const gs = sc?.dates?.[0]?.games || [];
+          hydrateOK[d] = gs.some(g => g.linescore != null);
+          for (const g of gs) {
             final[g.gamePk] = g.status?.abstractGameState === 'Final';
+            const i1 = g.linescore?.innings?.[0];
+            if (i1) lineFirst[g.gamePk] = { away: i1.away?.runs, home: i1.home?.runs };
           }
         } catch {}
       }
+
+      // If hydrate is silently ignored the symptom is an empty lineFirst, which is
+      // indistinguishable from "no game completed a first inning". Voiding on that
+      // would terminally kill every pred_game row, and no delete action exists to
+      // undo it. So a date with no linescores at all is treated as a fetch problem
+      // and left pending, and only a date that DID return linescores is allowed to
+      // void an individual game for a missing first inning.
+      const gameResults = [];
+      for (const r of gameRows) {
+        if (!final[r.game_id]) { gameResults.push({ ...r, state: 'pending', note: 'not final yet' }); continue; }
+        if (!hydrateOK[r.date]) { gameResults.push({ ...r, state: 'pending', note: 'linescore hydrate empty for date' }); continue; }
+        const f1 = lineFirst[r.game_id];
+        if (!f1 || f1.away == null || f1.home == null) {
+          gameResults.push({ ...r, state: 'void', note: 'no completed first inning' });
+          continue;
+        }
+        const a = parseInt(f1.away) || 0, h = parseInt(f1.home) || 0;
+        gameResults.push({
+          ...r, state: 'settled',
+          actualF1Away: a, actualF1Home: h, actualF1Runs: a + h,
+          actualYrfi: (a + h) > 0 ? 1 : 0,
+        });
+      }
+      const noHydrate = Object.entries(hydrateOK).filter(([, ok]) => !ok).map(([d]) => d);
+      if (noHydrate.length) console.warn('[FL] linescore hydrate returned nothing for:', noHydrate.join(', '));
 
       const results = [];
       for (const gid of Object.keys(byGame)) {
@@ -7446,9 +7481,10 @@ const FL = {
         }
       }
 
-      if (results.length) {
-        const res = await this.call('settle-results', { results: { pitchers: results } });
-        console.log(`[FL] settled ${res.settled}, voided ${res.voided}`);
+      if (results.length || gameResults.length) {
+        const res = await this.call('settle-results', { results: { pitchers: results, games: gameResults } });
+        const gSettled = gameResults.filter(g => g.state === 'settled').length;
+        console.log(`[FL] settled ${res.settled}, voided ${res.voided} (games settled this pass: ${gSettled}/${gameResults.length})`);
       }
     } catch (e) {
       console.warn('[FL] settle failed (app unaffected):', e.message);
