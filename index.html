@@ -4795,7 +4795,7 @@ function showGuide() {
       color: 'var(--g)',
       body: `<p>The landing view. It answers one question: <b style="color:var(--t)">where should I look today?</b> Everything on it is a glance surface — nothing here is meant to be studied. Click anything to drill into the detail tab behind it.</p>
 <ul style="margin:8px 0 8px 18px;line-height:2">
-  <li><b style="color:var(--t)">Top Signals</b> — the tails of every module, filtered by <b>absolute</b> thresholds (K ≥ 72, TB ≥ 70, YRFI ≥ 60 or ≤ 33). If nothing qualifies, the block says so. It does not pad itself out to six cards on a flat slate. Fully deterministic — no AI credits.</li>
+  <li><b style="color:var(--t)">Top Signals</b> — the tails of every module, filtered by <b>absolute</b> thresholds (K ≥ 72, TB ≥ 90, YRFI ≥ 60 or ≤ 33). If nothing qualifies, the block says so. It does not pad itself out to six cards on a flat slate. Fully deterministic — no AI credits.</li>
   <li><b style="color:var(--t)">Strikeout Matchups</b> — scatter, one bubble per starter. Click to open the K Board with that pitcher highlighted.</li>
   <li><b style="color:var(--t)">Total Bases</b> — ranked bars, one per lineup. Click to open TB Targets.</li>
   <li><b style="color:var(--t)">Data note</b> at the bottom — always states what is missing or estimated right now.</li>
@@ -4832,7 +4832,7 @@ function showGuide() {
   <li>Pitcher K% axis: <b>14 → 34</b></li>
   <li>Opponent lineup K% axis: <b>17 → 28</b></li>
   <li>K composite raw: <b>33 → 66</b></li>
-  <li>TB raw score: <b>0.300 → 0.620</b></li>
+  <li>TB raw score: <b>0.205 → 0.525</b></li>
 </ul>
 <p style="margin-top:8px"><b style="color:var(--t)">Shrinkage.</b> Low-sample rates are pulled toward the league mean so a pitcher two starts in with a fluky 38% K rate does not plot in the corner of the scatter and look like the play of the slate:</p>
 <p style="margin:6px 0 6px 18px;font-family:var(--fm);font-size:12px;color:var(--t2)">adjusted = (n × observed + k × prior) ÷ (n + k)</p>
@@ -5073,7 +5073,15 @@ const ANCHOR = {
   pK:    { lo: 14.0,  hi: 34.0  },  // SP K% vs hand
   oppK:  { lo: 17.0,  hi: 28.0  },  // opposing lineup K% vs hand
   kRaw:  { lo: 33.0,  hi: 66.0  },  // sKBoard raw composite units
-  tbRaw: { lo: 0.300, hi: 0.620 },  // scoreTBTargets raw score units
+  tbRaw: { lo: 0.205, hi: 0.525 },  // scoreTBTargets raw score units
+  // Recentered 2026-09-02 off 1,144 batter-scores across five slates, measured
+  // AFTER the platoon-split fetch was fixed (it had been returning null for every
+  // player, so the old 0.300–0.620 window was fitted to a broken distribution).
+  // Pooled: p02 0.207 · p25 0.315 · med 0.365 · p75 0.418 · p98 0.526.
+  // Width is unchanged at 0.320, so sensitivity is identical; only the centre moved.
+  // Old window put the median batter at 19 and pinned ~20% of every slate at 0.
+  // ANCHOR.kRaw deliberately NOT touched: K ≥ 72 maps to raw 56.8 against a pooled
+  // p95 of 57.8, so that threshold already selects a ~5% tail and is working.
 };
 function anchorPct(v, a) {
   const n = parseFloat(v);
@@ -5345,10 +5353,11 @@ function scoreTBTargets() {
   // Top targets: best 15
   const top = sorted.slice(0, 15);
 
-  // Low targets: bottom of the list where a prop line exists and pct <= 35
-  // Higher prop line relative to low model score = stronger under signal
+  // Low targets: bottom of the list where a prop line exists and pct <= 10.
+  // Was 35, which under the recentred window would catch ~75% of the slate — not
+  // a tail, and the prop-line tiebreak below would end up doing all the ranking.
   const low = sorted
-    .filter(t => t.pct <= 35 && t.propLine != null)
+    .filter(t => t.pct <= 10 && t.propLine != null)
     .sort((a, b) => {
       // Sort by prop line desc (higher line on a weak batter = better under)
       const lineDiff = (b.propLine - a.propLine);
@@ -6806,7 +6815,11 @@ function buildTBLineups() {
 // ─── TOP SIGNALS ───
 // Absolute thresholds, not top-N. A slate with nothing on it returns an empty
 // array and says so, rather than manufacturing six confident cards.
-const SIG_THRESH = { k: 72, tb: 70, yrfiHi: 60, yrfiLo: 33 };
+// TB moved 70 → 90 alongside the ANCHOR.tbRaw recentring. Under the old window a
+// TB of 70 sat past p99 of the real distribution and selected ~4 batters a slate;
+// under the new one the same raw score reads ~90. The threshold did not become
+// stricter — the scale moved and this follows it, so the tail rate is preserved.
+const SIG_THRESH = { k: 72, tb: 90, yrfiHi: 60, yrfiLo: 33 };
 const SIG_MAX = 6;
 
 function buildTopSignals(kRows, tbRows) {
