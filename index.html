@@ -7281,8 +7281,29 @@ const FL = {
       const byGame = {};
       for (const r of rows) (byGame[r.game_id] = byGame[r.game_id] || []).push(r);
 
+      // A game must be FINAL before its box score can be trusted. todayISO() is
+      // UTC, so an evening load here sees "tomorrow" and would otherwise go
+      // settling games still in the fourth inning — recording partial strikeouts
+      // as final and marking the row done forever. Check status per date first.
+      const final = {};
+      for (const d of [...new Set(rows.map(r => r.date))]) {
+        try {
+          const sc = await proxyFetch(`${MLB_BASE}/schedule?sportId=1&date=${d}`);
+          for (const g of (sc?.dates?.[0]?.games || [])) {
+            final[g.gamePk] = g.status?.abstractGameState === 'Final';
+          }
+        } catch {}
+      }
+
       const results = [];
       for (const gid of Object.keys(byGame)) {
+        // Unknown status is treated as not-final: leave pending, try again later.
+        // settle_attempts still increments, so a game that never resolves stops
+        // being asked about after five tries.
+        if (!final[gid]) {
+          for (const r of byGame[gid]) results.push({ ...r, state: 'pending', note: 'not final yet' });
+          continue;
+        }
         let box = null;
         try { box = await proxyFetch(`${MLB_BASE}/game/${gid}/boxscore`); } catch {}
         for (const r of byGame[gid]) {
