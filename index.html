@@ -5164,11 +5164,13 @@ function emptyBlock(msg, detail) {
 // ─────────────────────────────────────────────────────────────
 
 async function fetchTBSplits() {
-  S.tbSplits = { batters:{}, pitchers:{}, loading:true, loaded:false };
+  S.tbSplits = { batters:{}, pitchers:{}, loading:true, loaded:false, diag:null };
   if (S.view === 'tb') renderTB(); // show loading state if tab is open
 
   try {
-    const season = new Date().getFullYear();
+    // Season follows the SLATE, not the wall clock. Browsing a 2026 date in 2027
+    // must not request 2027 splits for players who have not played yet.
+    const season = activeStatsSeason(S.date || todayISO());
     const batterIds = [], pitcherIds = [];
 
     for (const g of S.games) {
@@ -5178,21 +5180,45 @@ async function fetchTBSplits() {
       for (const b of (g.home_lu||[])) if (b.player_id) batterIds.push(b.player_id);
     }
 
+    // Workers Free allows 50 subrequests per invocation, and the Worker fires one
+    // fetch per player. Sending ~236 batters in a single call silently loses
+    // everything past the 50th — which is exactly what was happening: roughly a
+    // fifth of the slate got real platoon data and the rest fell back to overall
+    // season slugging, with no way to tell the two apart downstream.
+    const CHUNK = 40;
+    const call = async (action, ids) => {
+      const uniq = [...new Set(ids)];
+      if (!uniq.length) return { splits:{}, diag:{ requested:0, withData:0, errors:{} } };
+      const chunks = [];
+      for (let i = 0; i < uniq.length; i += CHUNK) chunks.push(uniq.slice(i, i + CHUNK));
+      const parts = await Promise.all(chunks.map(c =>
+        fetch(CF_WORKER_URL, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ action, playerIds: c, season })
+        }).then(r => r.json())
+          .catch(() => ({ splits:{}, diag:{ requested:c.length, withData:0, errors:{ fetch_failed:c.length } } }))
+      ));
+      const splits = Object.assign({}, ...parts.map(p => p.splits || {}));
+      const diag = parts.reduce((a, p) => ({
+        requested: a.requested + (p.diag?.requested || 0),
+        withData:  a.withData  + (p.diag?.withData  || 0),
+        errors: Object.entries(p.diag?.errors || {})
+          .reduce((e, [k, v]) => ({ ...e, [k]: (e[k] || 0) + v }), a.errors),
+      }), { requested:0, withData:0, errors:{} });
+      return { splits, diag };
+    };
+
     const [bRes, pRes] = await Promise.all([
-      fetch(CF_WORKER_URL, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ action:'batter-splits', playerIds:[...new Set(batterIds)], season })
-      }).then(r=>r.json()),
-      fetch(CF_WORKER_URL, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ action:'pitcher-splits', playerIds:[...new Set(pitcherIds)], season })
-      }).then(r=>r.json()),
+      call('batter-splits',  batterIds),
+      call('pitcher-splits', pitcherIds),
     ]);
 
-    S.tbSplits.batters   = bRes.splits || {};
-    S.tbSplits.pitchers  = pRes.splits || {};
+    S.tbSplits.batters   = bRes.splits;
+    S.tbSplits.pitchers  = pRes.splits;
+    S.tbSplits.diag      = { batters: bRes.diag, pitchers: pRes.diag };
     S.tbSplits.loading   = false;
     S.tbSplits.loaded    = true;
+    console.log('[splits] batters', bRes.diag, '· pitchers', pRes.diag);
   } catch(e) {
     S.tbSplits.loading = false;
     S.tbSplits.loaded  = true;
@@ -5252,9 +5278,18 @@ function scoreTBTargets() {
         const workerBatterSplit = S.tbSplits.batters[b.player_id] || {};
         // num() guards against NaN — parseFloat on undefined/'' returns NaN, which ?? does NOT catch
         const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
-        const batterSLGvsSP = (spHand === 'R')
-          ? (num(workerBatterSplit.vsR) ?? num(bSplit(b, 'R').slg) ?? num(b.slg) ?? 0.380)
-          : (num(workerBatterSplit.vsL) ?? num(bSplit(b, 'L').slg) ?? num(b.slg) ?? 0.380);
+
+        // Four layers, best first. slgSrc records which one actually answered.
+        // Without it a bad TB score cannot be attributed to the model rather than
+        // to missing data — the failure that hid the broken platoon fetch all season.
+        const wSplit    = num(spHand === 'R' ? workerBatterSplit.vsR : workerBatterSplit.vsL);
+        const aiSplit   = num(bSplit(b, spHand === 'R' ? 'R' : 'L').slg);
+        const seasonSlg = num(b.slg);
+        const batterSLGvsSP = wSplit ?? aiSplit ?? seasonSlg ?? 0.380;
+        const slgSrc = wSplit    != null ? 'platoon'
+                     : aiSplit   != null ? 'ai_split'
+                     : seasonSlg != null ? 'season'
+                     : 'default';
 
         // Switch hitters bat opposite the SP, so a switch hitter facing a RHP is a
         // LEFT-handed batter for the purpose of the pitcher's split. Treating 'S' as
@@ -5288,7 +5323,12 @@ function scoreTBTargets() {
           venueName: g.venue || '', score,
           propLine: prop?.line ?? null,
           underPrice: prop?.underPrice ?? null,
-          hasWorkerData: !!(S.tbSplits.batters[b.player_id]),
+          // player_id and oppSPId are primary-key material for pred_batter and
+          // were never carried through. slgSrc feeds the slg_src column.
+          playerId: b.player_id, oppSPId, slgSrc,
+          // An entry existed for every player even when it was all nulls, so this
+          // read true on a total fetch failure and the header rendered a green ✓.
+          hasWorkerData: wSplit != null,
           estimated: !!b._estimated,
         });
       }
@@ -5334,15 +5374,24 @@ function renderTB() {
     return;
   }
 
-  const { top, low } = scoreTBTargets();
+  const { top, low, mins } = scoreTBTargets();
   if (!top.length) {
     el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--t2);font-size:14px">No lineup data available yet.</div>`;
     return;
   }
 
-  const dataNote = S.tbSplits.loaded
-    ? `<span style="color:var(--t3);font-size:11px">Individual splits ${top.some(t=>t.hasWorkerData) ? '✓' : '— early season, using team fallback'} · Min 50 PA · Min 20 SP IP</span>`
-    : '';
+  // A count, not a boolean. `some()` went green on a single hit, so a slate where
+  // 4 of 222 batters had real platoon data looked identical to full coverage.
+  const dataNote = (() => {
+    if (!S.tbSplits.loaded) return '';
+    const d = S.tbSplits.diag?.batters;
+    const cov = d && d.requested
+      ? `${d.withData}/${d.requested} platoon${d.withData < d.requested ? ' · rest on season SLG' : ''}`
+      : (top.some(t => t.hasWorkerData) ? 'platoon ✓' : '— no split data, using season SLG');
+    // These were hardcoded 50/20 while adaptiveMins() had been scaling them by
+    // season progress since spring — the header was stating the wrong gate.
+    return `<span style="color:var(--t3);font-size:11px">Individual splits ${cov} · Min ${mins.batterPA} PA · Min ${mins.pitcherIP} SP IP${mins.scaled ? ' (scaled)' : ''}</span>`;
+  })();
 
   function mkCard(t, isLow) {
     const slgColor  = t.batterSLG  >= 0.500 ? 'var(--pu)' : t.batterSLG  >= 0.430 ? 'var(--g)' : 'var(--t)';
