@@ -7552,7 +7552,7 @@ const FL = {
     return { ok, checks, why: ok ? null : 'One or more as-of probes failed — see table above.' };
   },
 
-  async backfill(days = 30, { dryRun = false } = {}) {
+  async backfill(days = 30, { dryRun = false, gapMs = 4000 } = {}) {
     if (!this.isAdmin()) { console.warn('[FL] locked — click the log badge to unlock'); return; }
     this.bfStop = false;
 
@@ -7568,45 +7568,68 @@ const FL = {
       const asOf = addDays(date, -1);
       this.badge(`backfill ${i}/${days} · ${date}`, '#bf5af2');
 
-      try {
-        await load(date, asOf);
-        if (!S.games.length) { summary.push({ date, pitchers: 0, games: 0, note: 'no games' }); continue; }
+      // A date loads fine in isolation but fails inside a long run — the failure
+      // is cumulative request volume, not the date. "Failed to fetch" is the
+      // browser giving up before MLB is ever reached, so the answer is to pause
+      // and ask again rather than to skip.
+      let done = false;
+      for (let attempt = 1; attempt <= 3 && !done && !this.bfStop; attempt++) {
+        try {
+          if (attempt > 1) {
+            const backoff = 5000 * attempt;
+            this.badge(`retry ${attempt} · ${date}`, '#ff9f0a');
+            console.log(`[FL] ${date} retry ${attempt} after ${backoff / 1000}s`);
+            await new Promise(r => setTimeout(r, backoff));
+          }
 
-        const pitchers = this.buildPitcherFeatures().map(p => ({ ...p, asOf }));
-        const games    = this.buildGameFeatures().map(g => ({ ...g, asOf }));
-        if (!pitchers.length && !games.length) { summary.push({ date, pitchers: 0, games: 0, note: 'no rows' }); continue; }
+          await load(date, asOf);
+          if (!S.games.length) { summary.push({ date, pitchers: 0, games: 0, note: 'no games' }); done = true; break; }
 
-        // isBackfill:1 turns on the Worker's as-of assertions. They THROW. A leak
-        // must fail loudly here rather than quietly produce confident garbage.
-        const scored = await this.call('score-date', {
-          date, isBackfill: 1, lineupSource: 'real', wxSource: 'none',
-          features: { pitchers, games },
-        });
+          const pitchers = this.buildPitcherFeatures().map(p => ({ ...p, asOf }));
+          const games    = this.buildGameFeatures().map(g => ({ ...g, asOf }));
+          if (!pitchers.length && !games.length) { summary.push({ date, pitchers: 0, games: 0, note: 'no rows' }); done = true; break; }
 
-        const drift = [
-          ...this.checkParity(pitchers, scored.pitchers || []),
-          ...this.checkGameParity(games, scored.games || []),
-        ];
-        if (drift.length) {
-          console.error(`[FL] DRIFT on ${date} — nothing logged for this date.`, drift);
-          summary.push({ date, pitchers: 0, games: 0, note: 'DRIFT — skipped' });
-          continue;
+          // isBackfill:1 turns on the Worker's as-of assertions. They THROW. A leak
+          // must fail loudly here rather than quietly produce confident garbage.
+          const scored = await this.call('score-date', {
+            date, isBackfill: 1, lineupSource: 'real', wxSource: 'none',
+            features: { pitchers, games },
+          });
+
+          const drift = [
+            ...this.checkParity(pitchers, scored.pitchers || []),
+            ...this.checkGameParity(games, scored.games || []),
+          ];
+          if (drift.length) {
+            // Drift is a real disagreement, not a transient failure. Retrying it
+            // would just produce the same disagreement more slowly.
+            console.error(`[FL] DRIFT on ${date} — nothing logged for this date.`, drift);
+            summary.push({ date, pitchers: 0, games: 0, note: 'DRIFT — skipped' });
+            done = true; break;
+          }
+
+          if (!dryRun) {
+            await this.call('log-predictions', { rows: { pitchers: scored.pitchers, games: scored.games } });
+          }
+          summary.push({
+            date, pitchers: (scored.pitchers || []).length, games: (scored.games || []).length,
+            note: dryRun ? 'dry run' : (attempt > 1 ? `written (retry ${attempt})` : 'written'),
+          });
+          console.log(`[FL] ${date}: ${(scored.pitchers||[]).length}p ${(scored.games||[]).length}g${dryRun ? ' (dry)' : ''}`);
+          done = true;
+        } catch (e) {
+          if (attempt === 3) {
+            console.warn(`[FL] ${date} failed after 3 attempts: ${e.message}`);
+            summary.push({ date, pitchers: 0, games: 0, note: 'ERR ' + e.message.slice(0, 60) });
+          }
         }
-
-        if (!dryRun) {
-          await this.call('log-predictions', { rows: { pitchers: scored.pitchers, games: scored.games } });
-        }
-        summary.push({ date, pitchers: (scored.pitchers || []).length, games: (scored.games || []).length, note: dryRun ? 'dry run' : 'written' });
-        console.log(`[FL] ${date}: ${(scored.pitchers||[]).length}p ${(scored.games||[]).length}g${dryRun ? ' (dry)' : ''}`);
-      } catch (e) {
-        // One bad date must not end the run. Re-running later fixes it for free.
-        console.warn(`[FL] ${date} failed: ${e.message}`);
-        summary.push({ date, pitchers: 0, games: 0, note: 'ERR ' + e.message.slice(0, 60) });
       }
 
-      // MLB is cached and cheap, but rapid date-flipping earned 429s from other
-      // hosts during testing. A second between dates costs 30s over a full run.
-      await new Promise(r => setTimeout(r, 1000));
+      // 1s was not enough: 22 of 30 dates failed identically on two consecutive
+      // runs, while any one of them loaded fine on its own. Each date fires ~90
+      // parallel requests, so the run exhausts the connection pool faster than it
+      // drains. 4s costs two minutes over a full backfill.
+      await new Promise(r => setTimeout(r, gapMs));
     }
 
     console.table(summary);
