@@ -6649,8 +6649,20 @@ function log5(pRate, oRate, lgRate) {
 
 // Expected innings for this start.
 function expectedIP(sp, l3) {
+  // IP/start comes from the game log's starts-only totals when we have them.
+  // The season-totals route (sp.ip / sp.gs) counts relief innings in the
+  // numerator and no relief games in the denominator, so a swingman reads
+  // absurdly high — Taylor Clarke measured 64 IP / 1 GS = 64.0 — then clamps to
+  // ipMax and projects roughly two strikeouts too many. It stays as the fallback
+  // for pitchers whose game log did not load, which is the pre-L3 first render.
+  const startsIP = parseFloat(l3?.starts_ip), startsN = parseInt(l3?.starts_n);
+  const fromStarts = (Number.isFinite(startsIP) && Number.isFinite(startsN) && startsN > 0)
+    ? startsIP / startsN : null;
+
   const seasonIP = parseFloat(sp?.ip), gs = parseInt(sp?.gs);
-  const perStart = (Number.isFinite(seasonIP) && Number.isFinite(gs) && gs > 0) ? seasonIP / gs : null;
+  const fromSeason = (Number.isFinite(seasonIP) && Number.isFinite(gs) && gs > 0) ? seasonIP / gs : null;
+
+  const perStart = fromStarts ?? fromSeason;
   const recent = l3 && Number.isFinite(parseFloat(l3.avg_ip)) ? parseFloat(l3.avg_ip) : null;
 
   let ip, src;
@@ -7320,7 +7332,12 @@ const FL = {
       out.push({
         pitcherId: r.spId, gameId: r.gameId,
         name: r.sp.name, team: r.myTeam, opponent: r.oppAbbr, hand: r.sp.hand || null,
-        seasonIp: r.sp.ip, seasonGs: r.sp.gs, whip: r.sp.whip,
+        // The Worker's expectedIP() takes scalars, so the starts-only preference
+        // has to be resolved HERE or the two copies would disagree and every row
+        // would trip the drift guard. Same order as the app's expectedIP().
+        seasonIp: (r.l3?.starts_ip != null && r.l3?.starts_n > 0) ? r.l3.starts_ip : r.sp.ip,
+        seasonGs: (r.l3?.starts_ip != null && r.l3?.starts_n > 0) ? r.l3.starts_n : r.sp.gs,
+        whip: r.sp.whip,
         l3AvgIp: r.l3?.avg_ip ?? null,
         // The Worker asserts every one of these is strictly before the target
         // date. On forward logs it is informational; on backfill it is the firewall.
