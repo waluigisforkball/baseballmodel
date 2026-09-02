@@ -1280,6 +1280,13 @@ async function load(date) {
     chips.push({cls:S.oddsWt>0?'odds':'',txt:'Edges Odds Wt: '+S.oddsWt+'%'});
     setChips(chips);
     setStatus('ok', raw.length + ' games loaded');
+    // Recent-form (L3) data is an INPUT to the projection, so it must exist before
+    // anything is logged. Previously it loaded lazily on the Bet Boards tab, which
+    // meant every logged row would have claimed L3 was unavailable — false, and
+    // undetectable from the output.
+    await fetchL3Logs();
+    FL.onSlateLoaded(date);   // fire-and-forget; wrapped, cannot break the app
+    FL.settleOpen();          // fill in outcomes for earlier dates
   } catch(e) {
     console.error(e); showError('Load Failed', e.message||'Unknown error');
     setStatus('err', 'Error: '+(e.message||'Load failed'));
@@ -7120,6 +7127,219 @@ function renderOverview() {
     r.addEventListener('click', () => drillTo('tb'));
   });
 }
+
+// ═══════════════════════════════════════════════════════════════
+// ─── PREDICTION LOG (FL) ───────────────────────────────────────
+// Records what the model predicted, then fills in what happened, so the
+// calibration constants can be measured instead of estimated.
+//
+// Two rules this module exists to enforce:
+//   1. Forward logging fires ONLY on today's date. Browsing back to an old
+//      slate scores it with TODAY'S stats — logging that would write confident
+//      garbage that is indistinguishable from a real prediction.
+//   2. Every write is compared against the Worker's own computation first.
+//      The model math lives in two places now; this is what stops them from
+//      drifting apart silently.
+//
+// Nothing in here can break the app: every entry point is wrapped, and a
+// failure logs a warning and returns.
+// ═══════════════════════════════════════════════════════════════
+
+// MLB writes innings in THIRDS: "6.1" is 6⅓, "6.2" is 6⅔. Reading those as
+// ordinary decimals understates innings and never overstates them.
+// Applied to OUTCOMES only. The model side is deliberately left as-is so the
+// first Model Report can measure the bias rather than assume it. See parking lot.
+function ipToDec(v) {
+  const n = parseFloat(v);
+  if (!Number.isFinite(n)) return null;
+  const whole = Math.trunc(n);
+  const outs  = Math.round((n - whole) * 10);
+  return R(whole + outs / 3, 3);
+}
+
+const FL = {
+  // ── Admin gate ──
+  // Not security: a browser app cannot keep a secret. It stops accidents and
+  // casual direct hits on the Worker. The real protections are structural —
+  // today-only logging, and no delete action exists anywhere.
+  pw()      { try { return localStorage.getItem('fl_pw') || ''; } catch { return ''; } },
+  isAdmin() { return !!this.pw(); },
+  unlock()  {
+    const p = prompt('Forkball admin password');
+    if (p == null) return;
+    try { localStorage.setItem('fl_pw', p); } catch {}
+    location.reload();
+  },
+  lock() { try { localStorage.removeItem('fl_pw'); } catch {} location.reload(); },
+
+  async call(action, payload = {}) {
+    const r = await fetch(CF_WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, pw: this.pw(), ...payload }),
+    });
+    const j = await r.json();
+    if (j.error) throw new Error(j.error);
+    return j;
+  },
+
+  // ── Features ──
+  // Built from the SAME rows the UI renders. If this ever diverged from what is
+  // on screen, the log would be describing a model that is not the one shipping.
+  buildPitcherFeatures() {
+    const out = [];
+    for (const r of buildKBoardRows()) {
+      if (!r.spId || !r.score) continue;
+      const pr = projectK(r);
+      if (!pr) continue;
+      const e = r.prop ? kProjEdge(r) : null;
+      out.push({
+        pitcherId: r.spId, gameId: r.gameId,
+        name: r.sp.name, team: r.myTeam, opponent: r.oppAbbr, hand: r.sp.hand || null,
+        seasonIp: r.sp.ip, seasonGs: r.sp.gs, whip: r.sp.whip,
+        l3AvgIp: r.l3?.avg_ip ?? null,
+        // The Worker asserts every one of these is strictly before the target
+        // date. On forward logs it is informational; on backfill it is the firewall.
+        l3: { dates: (r.l3?.games || []).map(g => g.date).filter(Boolean) },
+        pK: r.score.pK_weighted, oppK: r.score.oK,
+        priorK: r.score.priorUsed, thin: r.score.thin,
+        kRaw: r.score.raw,
+        mktLine:      r.prop?.line ?? null,
+        mktOverPx:    r.prop?.overPrice ?? null,
+        mktUnderPx:   r.prop?.underPrice ?? null,
+        // bookP is direction-adjusted for display; store P(over) consistently.
+        mktDevigProb: e ? (e.dir === 'over' ? e.bookP : R(1 - e.bookP, 3)) : null,
+        edgePts:      e?.edgePts ?? null,
+        _localProjK:  pr.projK,
+      });
+    }
+    return out;
+  },
+
+  // ── Drift guard ──
+  // The Worker returns what IT computed. The app already computed the same thing
+  // for display. Any disagreement means the two copies of the model have diverged,
+  // and the log would silently start describing the wrong one.
+  checkParity(sent, returned) {
+    const local = {};
+    for (const p of sent) local[p.pitcherId] = p._localProjK;
+    const bad = [];
+    for (const row of returned) {
+      const a = local[row.pitcher_id], b = row.proj_k;
+      if (a == null || b == null) continue;
+      if (Math.abs(a - b) > 0.001) bad.push({ id: row.pitcher_id, name: row.name, app: a, worker: b });
+    }
+    return bad;
+  },
+
+  // ── Forward log ──
+  async onSlateLoaded(date) {
+    if (!this.isAdmin()) return;                       // friends' visits write nothing
+    if (date !== todayISO()) {                         // RULE 1 — see header
+      console.log('[FL] historical date — nothing logged (correct)');
+      return;
+    }
+    try {
+      // TB splits arrive asynchronously; give them a moment so the row set is the
+      // same one the user will actually see. Harmless if they never arrive.
+      await new Promise(res => setTimeout(res, 1500));
+
+      const pitchers = this.buildPitcherFeatures();
+      if (!pitchers.length) return;
+
+      const scored = await this.call('score-date', {
+        date, isBackfill: 0, lineupSource: 'real', wxSource: 'forecast',
+        features: { pitchers },
+      });
+
+      const drift = this.checkParity(pitchers, scored.pitchers || []);
+      if (drift.length) {
+        console.error('[FL] MODEL DRIFT — app and Worker disagree. NOTHING LOGGED.', drift);
+        this.badge(`drift: ${drift.length} rows`, '#ff453a');
+        return;
+      }
+
+      await this.call('log-predictions', { rows: { pitchers: scored.pitchers } });
+      console.log(`[FL] logged ${scored.pitchers.length} pitchers · ${scored.modelVersion}`);
+      this.badge(`logged ${scored.pitchers.length}`, '#00c97a');
+    } catch (e) {
+      console.warn('[FL] log failed (app unaffected):', e.message);
+      this.badge('log failed', '#ff9f0a');
+    }
+  },
+
+  // ── Settle ──
+  // Self-healing: queries for anything still unresolved from earlier dates and
+  // fills it in. Skip a week and the next load catches up on all of it.
+  async settleOpen() {
+    if (!this.isAdmin()) return;
+    try {
+      const un = await this.call('fetch-unsettled', { beforeDate: todayISO(), limit: 300 });
+      const rows = un.rows?.pitchers || [];
+      if (!rows.length) return;
+
+      const byGame = {};
+      for (const r of rows) (byGame[r.game_id] = byGame[r.game_id] || []).push(r);
+
+      const results = [];
+      for (const gid of Object.keys(byGame)) {
+        let box = null;
+        try { box = await proxyFetch(`${MLB_BASE}/game/${gid}/boxscore`); } catch {}
+        for (const r of byGame[gid]) {
+          if (!box) { results.push({ ...r, state: 'pending', note: 'boxscore unavailable' }); continue; }
+          const st = this.pitcherLine(box, r.pitcher_id);
+          // A listed starter who did not start is not a miss — it is a non-event.
+          // Without a terminal void these rows are re-queried on every load forever.
+          if (!st) { results.push({ ...r, state: 'void', note: 'not in boxscore' }); continue; }
+          if (parseInt(st.gamesStarted) !== 1) { results.push({ ...r, state: 'void', note: 'scratched or relieved' }); continue; }
+          results.push({
+            ...r, state: 'settled',
+            actualK:  parseInt(st.strikeOuts) || 0,
+            actualIp: ipToDec(st.inningsPitched),
+            actualBf: parseInt(st.battersFaced) || null,
+          });
+        }
+      }
+
+      if (results.length) {
+        const res = await this.call('settle-results', { results: { pitchers: results } });
+        console.log(`[FL] settled ${res.settled}, voided ${res.voided}`);
+      }
+    } catch (e) {
+      console.warn('[FL] settle failed (app unaffected):', e.message);
+    }
+  },
+
+  pitcherLine(box, pid) {
+    for (const side of ['away', 'home']) {
+      const p = box?.teams?.[side]?.players?.['ID' + pid];
+      const s = p?.stats?.pitching;
+      if (s && Object.keys(s).length) return s;
+    }
+    return null;
+  },
+
+  // ── Minimal status affordance ──
+  badge(txt, color) {
+    let el = document.getElementById('flBadge');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'flBadge';
+      el.style.cssText = 'position:fixed;bottom:8px;right:8px;z-index:9999;font-family:var(--fm),monospace;'
+        + 'font-size:10px;padding:4px 8px;border-radius:8px;background:#1a1a1e;border:1px solid #333;'
+        + 'cursor:pointer;opacity:0.75';
+      el.onclick = () => FL.isAdmin() ? FL.lock() : FL.unlock();
+      document.body.appendChild(el);
+    }
+    el.textContent = 'log · ' + txt;
+    el.style.color = color || '#888';
+  },
+};
+
+// Show the unlock affordance on load. Locked shows a dot; unlocked reports status.
+window.addEventListener('load', () => {
+  try { FL.badge(FL.isAdmin() ? 'ready' : 'locked', FL.isAdmin() ? '#888' : '#555'); } catch {}
+});
 
 </script>
 </body>
