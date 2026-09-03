@@ -799,6 +799,7 @@ canvas{max-width:100%}
       <button class="vt" data-v="tb" id="vtTB">🎯 TB Targets</button>
       <button class="vt" data-v="pitchmash" id="vtPitchMash">🔥 Pitch Mash</button>
       <button class="vt" data-v="boards" id="vtBoards" style="display:none">🎲 Bet Boards</button>
+      <button class="vt" data-v="report" id="vtReport">📋 Model Report</button>
       <button class="btn" id="dfsUploadTabBtn" onclick="document.getElementById('dfsFileInput').click()" style="display:none;margin-left:auto;background:var(--pu);font-size:11px;padding:4px 13px">📂 Upload DK Salaries</button>
     </div>
     <div id="overviewView" style="display:none"></div>
@@ -813,6 +814,7 @@ canvas{max-width:100%}
     <div id="tbView" style="display:none"></div>
     <div id="pitchmashView" style="display:none"></div>
     <div id="boardsView" style="display:none"></div>
+    <div id="reportView" style="display:none"></div>
   </div>
   <div id="gameDetail" style="display:none">
     <button class="bkbtn" id="backBtn">← Back to Slate</button>
@@ -2981,6 +2983,7 @@ function renderView() {
   showEl('tbView',      S.view==='tb');
   showEl('pitchmashView', S.view==='pitchmash');
   showEl('boardsView',    S.view==='boards');
+  showEl('reportView',    S.view==='report');
   renderYRFIStrip(); // re-renders when game filter changes
   if      (S.view==='overview')  renderOverview();
   else if (S.view==='cards')     renderCards();
@@ -2990,6 +2993,7 @@ function renderView() {
   else if (S.view==='tb')        renderTB();
   else if (S.view==='pitchmash') renderPitchMash();
   else if (S.view==='boards')    renderBetBoards();
+  else if (S.view==='report')    renderModelReport();
 }
 
 // ─── CARDS ───
@@ -7280,6 +7284,292 @@ function renderOverview() {
 // Nothing in here can break the app: every entry point is wrapped, and a
 // failure logs a warning and returns.
 // ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+// ─── MODEL REPORT ──────────────────────────────────────────────
+// Reads the prediction log back and describes how wrong the model
+// has been. Deterministic templating over the Worker's report-query
+// SQL — no AI, and deliberately NO threshold optimiser or "best
+// settings" search. With a few hundred settled rows almost any
+// threshold can be made to look good in hindsight. This panel
+// describes error; every constant change is a human decision made
+// after reading it.
+//
+// Visible to everyone. Backfill and logging stay admin-gated.
+// ═══════════════════════════════════════════════════════════════
+
+const MR = {
+  data: null,
+  loading: false,
+  err: null,
+  fetchedAt: null,
+
+  // Sample-size vocabulary, per spec. Every figure in this tab carries its n,
+  // because "mean error 0.32" over 12 rows and over 800 rows are different
+  // claims and nothing else on screen distinguishes them.
+  tier(n) {
+    if (!n || n < 30)  return { label: 'insufficient', color: 'var(--r)'  };
+    if (n < 100)       return { label: 'provisional',  color: 'var(--y)'  };
+    return               { label: null,                color: 'var(--t3)' };
+  },
+
+  async load(force) {
+    if (this.loading) return;
+    if (this.data && !force) return;
+    this.loading = true; this.err = null;
+    renderModelReport();
+    try {
+      this.data = await FL.call('report-query', {});
+      this.fetchedAt = new Date();
+    } catch (e) {
+      this.err = e.message;
+    }
+    this.loading = false;
+    renderModelReport();
+  },
+};
+
+// ── formatting ──
+const mrNum = (v, d = 2) => (v == null || !Number.isFinite(v)) ? "—" : v.toFixed(d);
+const mrSigned = (v, d = 2) => (v == null || !Number.isFinite(v)) ? '—' : (v >= 0 ? '+' : '') + v.toFixed(d);
+const mrPct = (v, d = 1) => (v == null || !Number.isFinite(v)) ? '—' : (v * 100).toFixed(d) + '%';
+
+function mrSection(title, subtitle, body) {
+  return `<div style="background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r2);padding:16px;margin-bottom:14px">
+    <div style="font-family:var(--fm);font-size:10px;font-weight:700;letter-spacing:1.2px;color:var(--g);text-transform:uppercase">${title}</div>
+    ${subtitle ? `<div style="font-size:11px;color:var(--t3);margin-top:5px;line-height:1.5">${subtitle}</div>` : ''}
+    <div style="margin-top:13px">${body}</div>
+  </div>`;
+}
+
+// A tile is a number plus the thing it is compared against. A number with no
+// reference point is not readable — "RMSE 2.22" only means something next to
+// what a reasonable alternative scored.
+function mrTile(label, value, note, color) {
+  return `<div style="background:var(--bg3);border-radius:var(--r1);padding:11px 12px;min-width:0">
+    <div style="font-family:var(--fm);font-size:9px;letter-spacing:.8px;color:var(--t3);text-transform:uppercase">${label}</div>
+    <div style="font-family:var(--fm);font-size:20px;font-weight:600;color:${color || 'var(--t)'};margin-top:5px;line-height:1.1">${value}</div>
+    ${note ? `<div style="font-size:10px;color:var(--t3);margin-top:4px;line-height:1.4">${note}</div>` : ''}
+  </div>`;
+}
+
+const mrGrid = (cells, min = 150) =>
+  `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(${min}px,1fr));gap:9px">${cells.join('')}</div>`;
+
+function mrTable(headers, rows) {
+  if (!rows.length) return `<div style="font-size:11px;color:var(--t3)">No rows.</div>`;
+  return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:11.5px">
+    <thead><tr>${headers.map((h, i) => `<th style="text-align:${i ? 'right' : 'left'};padding:6px 9px;font-family:var(--fm);font-size:9px;letter-spacing:.8px;color:var(--t3);text-transform:uppercase;border-bottom:1px solid var(--b1);white-space:nowrap">${h}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r => `<tr>${r.map((c, i) => `<td style="text-align:${i ? 'right' : 'left'};padding:7px 9px;border-bottom:1px solid var(--b1);font-family:${i ? 'var(--fm)' : 'var(--fb)'};color:var(--t2);white-space:nowrap">${c}</td>`).join('')}</tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+// n rendered with its sample-size verdict attached, so the two can never be
+// read apart.
+function mrN(n) {
+  const t = MR.tier(n);
+  return `${n ?? 0}${t.label ? ` <span style="color:${t.color};font-size:9.5px">${t.label}</span>` : ''}`;
+}
+
+// Horizontal bar chart. Used for the score-calibration panels, where the
+// question is only whether the bars rise from left to right.
+function mrBars(rows, opts = {}) {
+  const vals = rows.map(r => r.value).filter(v => v != null && Number.isFinite(v));
+  if (!vals.length) return `<div style="font-size:11px;color:var(--t3)">No settled rows yet.</div>`;
+  const max = Math.max(...vals) || 1;
+  return `<div style="display:flex;flex-direction:column;gap:3px">${rows.map(r => {
+    const w = (r.value != null && Number.isFinite(r.value)) ? Math.max(1, (r.value / max) * 100) : 0;
+    const faint = (r.n || 0) < 10;   // thin buckets drawn faint, not hidden
+    return `<div style="display:flex;align-items:center;gap:8px;opacity:${faint ? .35 : 1}">
+      <div style="width:44px;text-align:right;font-family:var(--fm);font-size:10px;color:var(--t3);flex-shrink:0">${r.label}</div>
+      <div style="flex:1;background:var(--bg3);border-radius:3px;height:16px;position:relative;min-width:40px">
+        <div style="width:${w}%;height:100%;background:${opts.color || 'var(--g)'};border-radius:3px"></div>
+      </div>
+      <div style="width:74px;font-family:var(--fm);font-size:10px;color:var(--t2);flex-shrink:0">${r.value == null ? '—' : r.value.toFixed(2)}<span style="color:var(--t3)"> ·${r.n ?? 0}</span></div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function renderModelReport() {
+  const el = document.getElementById('reportView');
+  if (!el) return;
+
+  if (!MR.data && !MR.loading && !MR.err) { MR.load(); }
+
+  if (MR.loading && !MR.data) {
+    el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--t3);font-size:12px">Reading the prediction log…</div>`;
+    return;
+  }
+  if (MR.err && !MR.data) {
+    el.innerHTML = `<div style="padding:30px;text-align:center">
+      <div style="color:var(--r);font-size:13px;margin-bottom:8px">Report query failed</div>
+      <div style="color:var(--t3);font-size:11px;font-family:var(--fm)">${MR.err}</div>
+      <button class="btn" onclick="MR.load(true)" style="margin-top:14px;font-size:11px;padding:5px 14px">Retry</button>
+    </div>`;
+    return;
+  }
+
+  const d = MR.data;
+  const p  = d.projection || {};
+  const ov = p.overall || {};
+  const out = [];
+
+  // ── header ──
+  const c = d.counts || {};
+  out.push(`<div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px">
+    <div>
+      <div style="font-size:17px;font-weight:600;color:var(--t)">Model Report</div>
+      <div style="font-size:11px;color:var(--t3);margin-top:3px;font-family:var(--fm)">
+        ${d.modelVersion} · ${c.first_date || '—'} → ${c.last_date || '—'} · ${c.dates || 0} dates
+      </div>
+    </div>
+    <div style="text-align:right">
+      <button class="btn" onclick="MR.load(true)" style="font-size:11px;padding:5px 13px">${MR.loading ? 'Refreshing…' : 'Refresh'}</button>
+      <div style="font-size:10px;color:var(--t3);margin-top:5px">${MR.fetchedAt ? 'as of ' + MR.fetchedAt.toLocaleTimeString() : ''}</div>
+    </div>
+  </div>`);
+
+  out.push(mrSection('Log contents', 'Rows written, and how many have outcomes attached. Only settled rows can be scored.',
+    mrGrid([
+      mrTile('Pitchers', `${c.pitchers_settled ?? 0}<span style="font-size:13px;color:var(--t3)"> / ${c.pitchers ?? 0}</span>`, 'settled / logged'),
+      mrTile('Games', `${c.games_settled ?? 0}<span style="font-size:13px;color:var(--t3)"> / ${c.games ?? 0}</span>`, 'settled / logged'),
+      mrTile('Batters', `${c.batters_settled ?? 0}<span style="font-size:13px;color:var(--t3)"> / ${c.batters ?? 0}</span>`,
+        (c.batters ?? 0) === 0 ? 'TB logging not yet wired' : 'settled / logged'),
+    ])));
+
+  // ── 1. projection accuracy ──
+  const skill = ov.skillVsMean;
+  const skillNote = skill == null ? '' :
+    skill > 0 ? `beats always guessing ${mrNum(ov.meanActual, 2)}`
+              : `WORSE than always guessing ${mrNum(ov.meanActual, 2)}`;
+  out.push(mrSection('Projection accuracy — strikeouts',
+    `Every settled start in range. Mean signed error is projected minus actual, so positive means the model projects too many strikeouts. ${mrN(ov.n)}`,
+    mrGrid([
+      mrTile('Mean signed error', mrSigned(ov.meanSignedErr), ov.meanSignedErr > 0 ? 'over-projecting' : 'under-projecting',
+        Math.abs(ov.meanSignedErr || 0) > 0.25 ? 'var(--y)' : 'var(--t)'),
+      mrTile('RMSE', mrNum(ov.rmse), 'typical miss, in strikeouts'),
+      mrTile('Correlation r', mrNum(ov.r), 'published systems run 0.35–0.45'),
+      mrTile('Skill vs mean', mrSigned(skill, 3), skillNote, skill > 0 ? 'var(--g)' : 'var(--r)'),
+    ])));
+
+  // ── 2. rate vs volume ──
+  const rv = d.rateVolume;
+  if (rv) {
+    const dom = Math.abs(rv.rateComponent) > Math.abs(rv.volumeComponent) ? 'rate' : 'volume';
+    out.push(mrSection('Where the bias comes from',
+      `An exact split of the bias into its two causes: projected strikeouts are a rate multiplied by a batters-faced count, so error in either shows up in the total. Currently <b style="color:var(--t2)">${dom}</b> dominates. ${mrN(rv.n)}`,
+      mrGrid([
+        mrTile('Volume error', mrSigned(rv.volumeComponent), `expected ${mrNum(rv.meanExpBf, 1)} BF vs actual ${mrNum(rv.meanActualBf, 1)}`,
+          dom === 'volume' ? 'var(--y)' : 'var(--t)'),
+        mrTile('Rate error', mrSigned(rv.rateComponent), `model ${mrPct(rv.modelRate)} K/BF vs actual ${mrPct(rv.actualRate)}`,
+          dom === 'rate' ? 'var(--y)' : 'var(--t)'),
+        mrTile('Total bias', mrSigned(rv.totalBias), 'the two components sum to this'),
+      ], 175)));
+  }
+
+  // ── 3. error by source ──
+  const grpRow = (name, g) => [name, mrN(g.n), mrSigned(g.meanSignedErr), mrNum(g.rmse), mrNum(g.r), mrSigned(g.skillVsMean, 3)];
+  const groups = [];
+  for (const g of (p.byIpSrc     || [])) groups.push(grpRow(`IP source · ${g.ipSrc}`, g));
+  for (const g of (p.byLineupSrc || [])) groups.push(grpRow(`Lineup · ${g.lineupSource}`, g));
+  for (const g of (p.byBackfill  || [])) groups.push(grpRow(`Origin · ${g.isBackfill ? 'backfill' : 'forward'}`, g));
+  for (const g of (p.byHalf      || [])) groups.push(grpRow(`Date half · ${g.half}`, g));
+  out.push(mrSection('Error by source',
+    'The same accuracy figures split by where the row came from. A group that behaves differently from the rest is where to look first. The date halves are a crude out-of-sample check — they search nothing, they just report both ends of the range.',
+    mrTable(['Group', 'n', 'Mean err', 'RMSE', 'r', 'Skill'], groups)));
+
+  // ── 4. innings ──
+  const inn = d.innings;
+  const innRows = (d.inningsByIpSrc || []).map(g => [
+    g.ipSrc, mrN(g.n), mrSigned(g.meanErr), mrNum(g.rmse),
+    g.meanL3Ip == null ? '—' : mrNum(g.meanL3Ip, 2),
+    g.meanSeasonIp == null ? '—' : mrNum(g.meanSeasonIp, 2),
+  ]);
+  out.push(mrSection('Expected innings',
+    `Innings drive batters faced, which drive strikeouts, so innings error propagates into everything above. The two right columns are the model's own inputs: recent-form average and season innings per start. A league-realistic figure for both is roughly 5.2. ${mrN(inn?.n)}`,
+    mrGrid([
+      mrTile('Mean IP error', mrSigned(inn?.meanErr), 'expected minus actual'),
+      mrTile('RMSE', mrNum(inn?.rmse), 'typical miss, in innings'),
+    ]) + `<div style="margin-top:12px">${mrTable(['IP source', 'n', 'Mean err', 'RMSE', 'L3 IP', 'Season IP/start'], innRows)}</div>`));
+
+  // ── 5. score calibration ──
+  const histRows = (arr, key) => (arr || []).map(b => ({
+    label: b.bucket, value: b.mean_actual, n: b.n_settled,
+  }));
+  const kH = d.histograms?.kPct || [];
+  const tbH = d.histograms?.tbPct || [];
+  const kSettled = kH.reduce((t, b) => t + (b.n_settled || 0), 0);
+  out.push(mrSection('Score calibration',
+    'Does a higher score actually mean more strikeouts? Bars should rise left to right. Buckets with fewer than 10 settled rows are drawn faint. Each bar shows the mean outcome and the number of settled rows behind it.',
+    `<div style="font-family:var(--fm);font-size:9.5px;letter-spacing:.8px;color:var(--t3);text-transform:uppercase;margin-bottom:7px">K score → mean actual K · ${mrN(kSettled)}</div>`
+    + mrBars(histRows(kH))
+    + `<div style="font-family:var(--fm);font-size:9.5px;letter-spacing:.8px;color:var(--t3);text-transform:uppercase;margin:16px 0 7px">TB score → mean actual total bases</div>`
+    + (tbH.length ? mrBars(histRows(tbH), { color: 'var(--pu)' })
+       : `<div style="font-size:11px;color:var(--t3)">No batter rows logged yet — TB logging is not wired.</div>`)));
+
+  // ── 6. first inning ──
+  const y = d.yrfi;
+  const yRows = (d.yrfiCalibration || []).map(b => [
+    `${b.bucket}–${b.bucket + 9}%`, mrN(b.n), mrPct(b.predicted_rate), mrPct(b.observed_rate),
+    mrSigned((b.predicted_rate - b.observed_rate) * 100, 1) + ' pts',
+  ]);
+  let yVerdict = '';
+  if (y) {
+    const beats = y.brier < y.brierBaseline;
+    yVerdict = `<div style="margin-top:12px;padding:10px 12px;border-radius:var(--r1);background:${beats ? 'var(--gd)' : 'var(--rd)'};border:1px solid ${beats ? 'var(--g)' : 'var(--r)'};font-size:11.5px;color:var(--t2);line-height:1.6">
+      ${beats
+        ? `Brier ${mrNum(y.brier, 4)} beats the ${mrNum(y.brierBaseline, 4)} a model that always guessed the base rate would score. The inputs are contributing.`
+        : `Brier ${mrNum(y.brier, 4)} is <b style="color:var(--r)">worse</b> than the ${mrNum(y.brierBaseline, 4)} a model that ignored every input and always guessed ${mrPct(y.baseRate)} would score. The inputs are not currently contributing.`}
+    </div>`;
+  }
+  out.push(mrSection('First inning (YRFI)',
+    `The only module whose output is already a probability, so it can be calibration-checked directly rather than only scored for error. Predicted and observed should track each other down the table. ${mrN(y?.n)}`,
+    mrGrid([
+      mrTile('Brier score', mrNum(y?.brier, 4), 'lower is better'),
+      mrTile('Base-rate Brier', mrNum(y?.brierBaseline, 4), `always guess ${mrPct(y?.baseRate)}`),
+    ]) + `<div style="margin-top:12px">${mrTable(['Predicted bucket', 'n', 'Predicted', 'Observed', 'Gap'], yRows)}</div>` + yVerdict));
+
+  // ── 7. market ──
+  const m = d.market;
+  const eRows = (d.edgeCalibration || []).map(b => [
+    `${b.bucket} to ${b.bucket + 2}`, mrN(b.n), mrPct(b.mean_model_prob), mrPct(b.mean_mkt_prob), mrPct(b.observed_over_rate),
+  ]);
+  out.push(mrSection('Versus the market',
+    'The only comparison that answers whether the model is worth betting: our squared error next to the closing line\'s, on exactly the same rows. Market columns are permanently NULL on backfilled rows, so this fills in from forward logging only.',
+    m ? mrGrid([
+          mrTile('Model RMSE', mrNum(m.modelRmse), `n = ${m.n}`,
+            (m.modelRmse < m.marketRmse) ? 'var(--g)' : 'var(--y)'),
+          mrTile('Market RMSE', mrNum(m.marketRmse), 'closing line as a projection'),
+          mrTile('Mean proj − line', mrSigned(m.meanProjMinusLine), 'systematic lean vs the book'),
+        ]) + `<div style="margin-top:12px">${mrTable(['Edge bucket', 'n', 'Model P(over)', 'Market P(over)', 'Observed over rate'], eRows)}</div>`
+      : `<div style="padding:14px;border-radius:var(--r1);background:var(--bg3);font-size:11.5px;color:var(--t3);line-height:1.6">
+           Insufficient — no settled row carries a market line yet. Forward logging adds roughly one slate per day; expect a first read in about four weeks.
+         </div>`));
+
+  // ── 8. dispersion ──
+  // Observation, not a recommendation. It is the number most likely to tempt a
+  // constant change off a single reading, and one reading is not evidence.
+  const fd = ov.fittedDispersion, cd = ov.currentDispersion;
+  if (fd != null) {
+    const gap = fd - cd;
+    out.push(mrSection('Dispersion',
+      'Feeds the negative binomial that turns a projection into P(over). Fitted is measured from this log and includes both real game variance and the model\'s own error, so it should sit somewhat ABOVE the configured value. If it sits below, the model is pricing more uncertainty than it has and every edge is being shrunk.',
+      mrGrid([
+        mrTile('Fitted', mrNum(fd, 3), 'measured from settled rows'),
+        mrTile('Configured', mrNum(cd, 3), 'DISPERSION constant'),
+        mrTile('Gap', mrSigned(gap, 3), Math.abs(gap) < 0.1 ? 'in line' : (gap < 0 ? 'configured value is high' : 'configured value is low'),
+          Math.abs(gap) < 0.1 ? 'var(--t)' : 'var(--y)'),
+      ]) + `<div style="margin-top:11px;font-size:11px;color:var(--t3);line-height:1.6">
+        Observation only. One reading is not evidence — check a second independent report before changing the constant.
+      </div>`));
+  }
+
+  out.push(`<div style="font-size:10.5px;color:var(--t3);line-height:1.7;padding:4px 2px 20px">
+    This tab describes error. It contains no threshold search and no "best settings" recommendation, by design — over a few hundred settled rows almost any threshold can be made to look good in hindsight. Constant changes are human decisions made after reading this.
+  </div>`);
+
+  el.innerHTML = out.join('');
+}
 
 // MLB writes innings in THIRDS: "6.1" is 6⅓, "6.2" is 6⅔. Reading those as
 // ordinary decimals understates innings and never overstates them.
