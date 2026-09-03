@@ -5296,6 +5296,50 @@ async function fetchTBSplits() {
   if (S.view === 'tb') renderTB();
 }
 
+// Total-bases weights. These lived as bare literals inside scoreTBTargets()
+// while the Worker held them in a named TB_W object. Two copies of the same
+// numbers with no way to compare them is exactly how the app and Worker came to
+// disagree on ANCHOR.tbRaw with nothing complaining, so they are named here and
+// the scoring is extracted into a function whose shape matches the Worker's.
+const TB_W = {
+  batterSLG: 0.45,
+  pitcherSLG: 0.35,
+  parkHR: 0.003,
+  parkRun: 0.002,
+  windOut: 0.04, windIn: -0.03,
+  tempPerDeg: 0.0005, tempBase: 65,
+  ord12: 0.04, ord35: 0.02, ord67: 0, ord89: -0.02,
+  away: 0.015,
+  defaultBatterSLG: 0.380,
+  defaultPitcherSLG: 0.400,
+};
+
+// b: { batterSLGvsSP, pitcherSLGvsBatter, parkHR, parkRun, weff, dome, tempF, ord, isAway }
+// Mirrors scoreBatterTB() in worker.js. Any edit here needs the same edit there
+// and a FEATURE_REV bump, or the drift guard will start failing every row.
+function scoreBatterTB(b) {
+  const n = (v) => { const x = parseFloat(v); return Number.isFinite(x) ? x : null; };
+  const bSLG = n(b.batterSLGvsSP)      ?? TB_W.defaultBatterSLG;
+  const pSLG = n(b.pitcherSLGvsBatter) ?? TB_W.defaultPitcherSLG;
+  const parkHR  = n(b.parkHR)  ?? 100;
+  const parkRun = n(b.parkRun) ?? 100;
+
+  const parkScore = ((parkHR - 100) * TB_W.parkHR) + ((parkRun - 100) * TB_W.parkRun);
+  const windBonus = b.weff === 'out' ? TB_W.windOut : b.weff === 'in' ? TB_W.windIn : 0;
+  // Worker tests tempF for null rather than truthiness. Matched deliberately:
+  // the two diverged at exactly temp_f === 0, which cannot occur in a regular
+  // season game but would have been a silent one-row parity failure if it did.
+  const tempBonus = (!b.dome && n(b.tempF) != null) ? (n(b.tempF) - TB_W.tempBase) * TB_W.tempPerDeg : 0;
+  const ord = parseInt(b.ord) || 9;
+  const ordBonus  = ord <= 2 ? TB_W.ord12 : ord <= 5 ? TB_W.ord35 : ord <= 7 ? TB_W.ord67 : TB_W.ord89;
+  const awayBonus = b.isAway ? TB_W.away : 0;
+
+  const score = (bSLG * TB_W.batterSLG) + (pSLG * TB_W.pitcherSLG)
+              + parkScore + windBonus + tempBonus + ordBonus + awayBonus;
+
+  return { score: R(score, 4), pct: anchorPct(score, ANCHOR.tbRaw) ?? 0, batterSLG: bSLG, pitcherSLG: pSLG };
+}
+
 function scoreTBTargets() {
   const targets = [];
   // Season-adaptive sample gates — the fixed 50 PA / 20 IP thresholds empty this
@@ -5367,17 +5411,15 @@ function scoreTBTargets() {
           ? (num(pSplits.vsL) ?? num(oppSP?.slg_against) ?? 0.400)
           : (num(pSplits.vsR) ?? num(oppSP?.slg_against) ?? 0.400);
 
-        const parkHR    = (g.park?.hr || 100);
-        const parkRun   = (g.park?.run || 100);
-        const parkScore = ((parkHR - 100) * 0.003) + ((parkRun - 100) * 0.002);
-        const windBonus = g.wx?.weff === 'out' ? 0.04 : g.wx?.weff === 'in' ? -0.03 : 0;
-        const tempBonus = (!g.wx?.dome && g.wx?.temp_f) ? (g.wx.temp_f - 65) * 0.0005 : 0;
-        const ordBonus  = b.ord <= 2 ? 0.04 : b.ord <= 5 ? 0.02 : b.ord <= 7 ? 0 : -0.02;
-        const awayBonus = isAway ? 0.015 : 0;
+        const parkHR  = (g.park?.hr  || 100);
+        const parkRun = (g.park?.run || 100);
 
-        const score = (batterSLGvsSP      * 0.45)
-                    + (pitcherSLGvsBatter * 0.35)
-                    + parkScore + windBonus + tempBonus + ordBonus + awayBonus;
+        const tb = scoreBatterTB({
+          batterSLGvsSP, pitcherSLGvsBatter, parkHR, parkRun,
+          weff: g.wx?.weff, dome: g.wx?.dome, tempF: g.wx?.temp_f,
+          ord: b.ord, isAway,
+        });
+        const score = tb.score;
 
         const prop = propLookup[normName(b.name)] || null;
 
@@ -5386,11 +5428,14 @@ function scoreTBTargets() {
           hand: bHand, ord: b.ord,
           oppSPName: oppSP?.name || 'TBD', spHand,
           batterSLG: batterSLGvsSP, pitcherSLG: pitcherSLGvsBatter,
-          parkHR, windDir: g.wx?.weff || 'none', windSpd: g.wx?.wsp || 0,
+          parkHR, parkRun, windDir: g.wx?.weff || 'none', windSpd: g.wx?.wsp || 0,
           temp: g.wx?.temp_f || null, dome: g.wx?.dome || false,
-          venueName: g.venue || '', score,
+          venueName: g.venue || '', score, pct: tb.pct,
           propLine: prop?.line ?? null,
           underPrice: prop?.underPrice ?? null,
+          // overPrice was collected in propLookup but never carried through; the
+          // pred_batter market columns and devigOver() both need it.
+          overPrice: prop?.overPrice ?? null,
           // player_id and oppSPId are primary-key material for pred_batter and
           // were never carried through. slgSrc feeds the slg_src column.
           playerId: b.player_id, oppSPId, slgSrc,
@@ -5406,7 +5451,8 @@ function scoreTBTargets() {
   // Map onto FIXED league bounds (ANCHOR.tbRaw), not the slate's own min/max —
   // same reasoning as normalizeKScores. Slate-relative scaling guaranteed a 100
   // and a 0 every single day regardless of whether the slate had anything on it.
-  targets.forEach(t => { t.pct = anchorPct(t.score, ANCHOR.tbRaw) ?? 0; });
+  // pct now comes from scoreBatterTB() at push time — one code path, so the
+  // Worker's tb_pct and the app's cannot drift apart unnoticed.
 
   const sorted = targets.sort((a, b) => b.score - a.score);
 
@@ -7327,6 +7373,34 @@ const MR = {
     this.loading = false;
     renderModelReport();
   },
+
+  // Fetches the raw log and hands it to the browser as a file. No server-side
+  // file writing and nothing persisted — the blob URL is revoked immediately.
+  async exportJson() {
+    const btn = document.getElementById('mrExpBtn');
+    const msg = document.getElementById('mrExpMsg');
+    const from = document.getElementById('mrExpFrom')?.value || '1900-01-01';
+    const to   = document.getElementById('mrExpTo')?.value   || '2999-12-31';
+    if (from > to) { if (msg) msg.textContent = 'From is after To.'; return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Exporting…'; }
+    if (msg) msg.textContent = '';
+    try {
+      const r = await FL.call('export-log', { from, to });
+      const counts = ['pred_pitcher', 'pred_batter', 'pred_game']
+        .map(k => `${(r[k] || []).length} ${k.replace('pred_', '')}`).join(' · ');
+      const blob = new Blob([JSON.stringify(r, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `forkball-log_${from}_to_${to}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      if (msg) msg.textContent = counts + ' exported.';
+    } catch (e) {
+      if (msg) { msg.textContent = 'Export failed: ' + e.message; msg.style.color = 'var(--r)'; }
+    }
+    if (btn) { btn.disabled = false; btn.textContent = 'Download JSON'; }
+  },
 };
 
 // ── formatting ──
@@ -7456,15 +7530,36 @@ function renderModelReport() {
   const rv = d.rateVolume;
   if (rv) {
     const dom = Math.abs(rv.rateComponent) > Math.abs(rv.volumeComponent) ? 'rate' : 'volume';
+    // Volume splits again into innings and batters-per-inning. Without this the
+    // tab can say "volume dominates" while the innings panel reads near zero,
+    // which looks like a contradiction: the remainder is the perBF formula, a
+    // separate lever from both innings and the strikeout rate.
+    const sub = (rv.inningsComponent != null && rv.bfPerIpComponent != null);
+    const subDom = !sub ? null
+      : Math.abs(rv.inningsComponent) > Math.abs(rv.bfPerIpComponent) ? 'innings' : 'perBF';
     out.push(mrSection('Where the bias comes from',
-      `An exact split of the bias into its two causes: projected strikeouts are a rate multiplied by a batters-faced count, so error in either shows up in the total. Currently <b style="color:var(--t2)">${dom}</b> dominates. ${mrN(rv.n)}`,
+      `An exact split of the bias into its causes: projected strikeouts are a rate multiplied by a batters-faced count, so error in either shows up in the total. Currently <b style="color:var(--t2)">${dom}</b> dominates. ${mrN(rv.n)}`,
       mrGrid([
         mrTile('Volume error', mrSigned(rv.volumeComponent), `expected ${mrNum(rv.meanExpBf, 1)} BF vs actual ${mrNum(rv.meanActualBf, 1)}`,
           dom === 'volume' ? 'var(--y)' : 'var(--t)'),
         mrTile('Rate error', mrSigned(rv.rateComponent), `model ${mrPct(rv.modelRate)} K/BF vs actual ${mrPct(rv.actualRate)}`,
           dom === 'rate' ? 'var(--y)' : 'var(--t)'),
-        mrTile('Total bias', mrSigned(rv.totalBias), 'the two components sum to this'),
-      ], 175)));
+        mrTile('Total bias', mrSigned(rv.totalBias), 'the components sum to this'),
+      ], 175)
+      + (sub ? `<div style="margin-top:11px">
+          <div style="font-family:var(--fm);font-size:9.5px;letter-spacing:.8px;color:var(--t3);text-transform:uppercase;margin-bottom:8px">Volume error splits again — ${subDom === 'innings' ? 'innings' : 'batters per inning'} dominates</div>
+          ${mrGrid([
+            mrTile('From innings', mrSigned(rv.inningsComponent),
+              `expected ${mrNum(rv.meanExpIp, 2)} IP vs actual ${mrNum(rv.meanActualIp, 2)}`,
+              subDom === 'innings' ? 'var(--y)' : 'var(--t)'),
+            mrTile('From BF per inning', mrSigned(rv.bfPerIpComponent),
+              `formula ${mrNum(rv.bfPerIpModel, 2)} vs actual ${mrNum(rv.bfPerIpActual, 2)}`,
+              subDom === 'perBF' ? 'var(--y)' : 'var(--t)'),
+          ], 175)}
+          <div style="font-size:10.5px;color:var(--t3);margin-top:8px;line-height:1.6">
+            Batters per inning is set by the <span style="font-family:var(--fm)">perBF</span> formula, a different lever from both expected innings and the strikeout rate.
+          </div>
+        </div>` : '')));
   }
 
   // ── 3. error by source ──
@@ -7563,6 +7658,20 @@ function renderModelReport() {
         Observation only. One reading is not evidence — check a second independent report before changing the constant.
       </div>`));
   }
+
+  // ── 9. export ──
+  // Bounded by date range from the start. export-log does an unbounded SELECT *
+  // on three tables; fine at ~1,200 rows, not once batters log ~250 a day.
+  out.push(mrSection('Export',
+    'Downloads the raw prediction log as JSON — every row, every column, including the audit fields this tab summarises. Bounded by date range because the export is unbounded server-side and batter rows accumulate quickly.',
+    `<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+      <div><div style="font-family:var(--fm);font-size:9px;letter-spacing:.8px;color:var(--t3);text-transform:uppercase;margin-bottom:5px">From</div>
+        <input type="date" id="mrExpFrom" value="${c.first_date || ''}" style="background:var(--bg3);border:1px solid var(--b1);border-radius:var(--r1);color:var(--t);padding:6px 9px;font-family:var(--fm);font-size:11px"></div>
+      <div><div style="font-family:var(--fm);font-size:9px;letter-spacing:.8px;color:var(--t3);text-transform:uppercase;margin-bottom:5px">To</div>
+        <input type="date" id="mrExpTo" value="${c.last_date || ''}" style="background:var(--bg3);border:1px solid var(--b1);border-radius:var(--r1);color:var(--t);padding:6px 9px;font-family:var(--fm);font-size:11px"></div>
+      <button class="btn" id="mrExpBtn" onclick="MR.exportJson()" style="font-size:11px;padding:7px 15px">Download JSON</button>
+      <div id="mrExpMsg" style="font-size:11px;color:var(--t3);align-self:center"></div>
+    </div>`));
 
   out.push(`<div style="font-size:10.5px;color:var(--t3);line-height:1.7;padding:4px 2px 20px">
     This tab describes error. It contains no threshold search and no "best settings" recommendation, by design — over a few hundred settled rows almost any threshold can be made to look good in hindsight. Constant changes are human decisions made after reading this.
@@ -7676,23 +7785,35 @@ const FL = {
       await new Promise(res => setTimeout(res, 1500));
 
       const pitchers = this.buildPitcherFeatures();
-      if (!pitchers.length) return;
+      // Batters are logged FORWARD ONLY and never backfilled. Platoon splits
+      // cannot be date-bounded — MLB's statSplits accepts a season but silently
+      // discards startDate/endDate — so a historical batter row would carry
+      // end-of-season splits against a mid-season date. Lookahead bias.
+      const batters = this.buildBatterFeatures();
+      if (!pitchers.length && !batters.length) return;
 
       const scored = await this.call('score-date', {
         date, isBackfill: 0, lineupSource: 'real', wxSource: 'forecast',
-        features: { pitchers },
+        features: { pitchers, batters },
       });
 
-      const drift = this.checkParity(pitchers, scored.pitchers || []);
-      if (drift.length) {
-        console.error('[FL] MODEL DRIFT — app and Worker disagree. NOTHING LOGGED.', drift);
-        this.badge(`drift: ${drift.length} rows`, '#ff453a');
+      // All three guards must pass before ANY table is written. A partial write
+      // would leave the log internally inconsistent for that date.
+      const drift  = this.checkParity(pitchers, scored.pitchers || []);
+      const bDrift = this.checkBatterParity(batters, scored.batters || []);
+      if (drift.length || bDrift.length) {
+        console.error('[FL] MODEL DRIFT — app and Worker disagree. NOTHING LOGGED.',
+          { pitchers: drift, batters: bDrift });
+        this.badge(`drift: ${drift.length + bDrift.length} rows`, '#ff453a');
         return;
       }
 
-      await this.call('log-predictions', { rows: { pitchers: scored.pitchers } });
-      console.log(`[FL] logged ${scored.pitchers.length} pitchers · ${scored.modelVersion}`);
-      this.badge(`logged ${scored.pitchers.length}`, '#00c97a');
+      await this.call('log-predictions', {
+        rows: { pitchers: scored.pitchers, batters: scored.batters },
+      });
+      const np = (scored.pitchers || []).length, nb = (scored.batters || []).length;
+      console.log(`[FL] logged ${np} pitchers · ${nb} batters · ${scored.modelVersion}`);
+      this.badge(`logged ${np}p ${nb}b`, '#00c97a');
     } catch (e) {
       console.warn('[FL] log failed (app unaffected):', e.message);
       this.badge('log failed', '#ff9f0a');
@@ -7708,10 +7829,14 @@ const FL = {
       const un = await this.call('fetch-unsettled', { beforeDate: todayISO(), limit: 300 });
       const rows     = un.rows?.pitchers || [];
       const gameRows = un.rows?.games    || [];
-      if (!rows.length && !gameRows.length) return;
+      const batRows  = un.rows?.batters  || [];
+      if (!rows.length && !gameRows.length && !batRows.length) return;
 
+      // Pitcher and batter rows are grouped together so a game's box score is
+      // fetched once and serves both.
       const byGame = {};
-      for (const r of rows) (byGame[r.game_id] = byGame[r.game_id] || []).push(r);
+      for (const r of rows)    (byGame[r.game_id] = byGame[r.game_id] || []).push(r);
+      for (const r of batRows) (byGame[r.game_id] = byGame[r.game_id] || []).push(r);
 
       // A game must be FINAL before its box score can be trusted. todayISO() is
       // UTC, so an evening load here sees "tomorrow" and would otherwise go
@@ -7723,7 +7848,7 @@ const FL = {
       const final    = {};
       const lineFirst = {};   // gamePk → { away, home } runs in inning 1
       const hydrateOK = {};   // date → did ANY game come back with a linescore
-      for (const d of [...new Set([...rows, ...gameRows].map(r => r.date))]) {
+      for (const d of [...new Set([...rows, ...gameRows, ...batRows].map(r => r.date))]) {
         try {
           const sc = await proxyFetch(`${MLB_BASE}/schedule?sportId=1&date=${d}&hydrate=linescore`);
           const gs = sc?.dates?.[0]?.games || [];
@@ -7761,26 +7886,54 @@ const FL = {
       const noHydrate = Object.entries(hydrateOK).filter(([, ok]) => !ok).map(([d]) => d);
       if (noHydrate.length) console.warn('[FL] linescore hydrate returned nothing for:', noHydrate.join(', '));
 
-      const results = [];
+      const results = [], batResults = [];
+      // Pitcher and batter rows share a queue keyed by game so each box score is
+      // fetched once. They are told apart by which id column they carry, not by
+      // position or count.
+      const push = (r, o) => (r.batter_id != null ? batResults : results).push({ ...r, ...o });
+
       for (const gid of Object.keys(byGame)) {
         // Unknown status is treated as not-final: leave pending, try again later.
         // settle_attempts still increments, so a game that never resolves stops
         // being asked about after five tries.
         if (!final[gid]) {
-          for (const r of byGame[gid]) results.push({ ...r, state: 'pending', note: 'not final yet' });
+          for (const r of byGame[gid]) push(r, { state: 'pending', note: 'not final yet' });
           continue;
         }
         let box = null;
         try { box = await proxyFetch(`${MLB_BASE}/game/${gid}/boxscore`); } catch {}
         for (const r of byGame[gid]) {
-          if (!box) { results.push({ ...r, state: 'pending', note: 'boxscore unavailable' }); continue; }
+          if (!box) { push(r, { state: 'pending', note: 'boxscore unavailable' }); continue; }
+
+          if (r.batter_id != null) {
+            const bs = this.batterLine(box, r.batter_id);
+            // A projected batter who never appeared is a non-event, not a miss.
+            // Voiding is terminal so the row stops being re-queried forever.
+            if (!bs) { push(r, { state: 'void', note: 'not in boxscore' }); continue; }
+            const pa = parseInt(bs.plateAppearances) || 0;
+            if (!pa) { push(r, { state: 'void', note: 'did not bat' }); continue; }
+            // TB = H + 2B + 2*3B + 3*HR. Derived from components rather than read
+            // from stat.totalBases, which is not reliably present on boxscores.
+            const h  = parseInt(bs.hits)      || 0;
+            const d2 = parseInt(bs.doubles)   || 0;
+            const d3 = parseInt(bs.triples)   || 0;
+            const hr = parseInt(bs.homeRuns)  || 0;
+            push(r, {
+              state: 'settled',
+              actualTb: h + d2 + (2 * d3) + (3 * hr),
+              actualAb: parseInt(bs.atBats) || 0,
+              actualPa: pa,
+            });
+            continue;
+          }
+
           const st = this.pitcherLine(box, r.pitcher_id);
           // A listed starter who did not start is not a miss — it is a non-event.
           // Without a terminal void these rows are re-queried on every load forever.
-          if (!st) { results.push({ ...r, state: 'void', note: 'not in boxscore' }); continue; }
-          if (parseInt(st.gamesStarted) !== 1) { results.push({ ...r, state: 'void', note: 'scratched or relieved' }); continue; }
-          results.push({
-            ...r, state: 'settled',
+          if (!st) { push(r, { state: 'void', note: 'not in boxscore' }); continue; }
+          if (parseInt(st.gamesStarted) !== 1) { push(r, { state: 'void', note: 'scratched or relieved' }); continue; }
+          push(r, {
+            state: 'settled',
             actualK:  parseInt(st.strikeOuts) || 0,
             actualIp: ipToDec(st.inningsPitched),
             actualBf: parseInt(st.battersFaced) || null,
@@ -7788,10 +7941,14 @@ const FL = {
         }
       }
 
-      if (results.length || gameResults.length) {
-        const res = await this.call('settle-results', { results: { pitchers: results, games: gameResults } });
-        const gSettled = gameResults.filter(g => g.state === 'settled').length;
-        console.log(`[FL] settled ${res.settled}, voided ${res.voided} (games settled this pass: ${gSettled}/${gameResults.length})`);
+      if (results.length || batResults.length || gameResults.length) {
+        const res = await this.call('settle-results', {
+          results: { pitchers: results, batters: batResults, games: gameResults },
+        });
+        const done = a => a.filter(x => x.state === 'settled').length;
+        console.log(`[FL] settled ${res.settled}, voided ${res.voided}`
+          + ` (p ${done(results)}/${results.length} · b ${done(batResults)}/${batResults.length}`
+          + ` · g ${done(gameResults)}/${gameResults.length})`);
       }
     } catch (e) {
       console.warn('[FL] settle failed (app unaffected):', e.message);
@@ -7827,6 +7984,74 @@ const FL = {
       });
     }
     return out;
+  },
+
+
+  // Batter / total-bases features. FORWARD ONLY — see the note in onSlateLoaded.
+  // Built from scoreTBTargets().all, the same rows the TB board renders, so the
+  // log cannot describe a different model than the one on screen.
+  buildBatterFeatures() {
+    const out = [];
+    let tb;
+    try { tb = scoreTBTargets(); } catch { return out; }
+    for (const t of (tb?.all || [])) {
+      if (!t.playerId || !t.gameId) continue;       // primary-key material
+      const dv = devigOver(t.overPrice, t.underPrice);
+      out.push({
+        batterId: t.playerId, gameId: t.gameId,
+        name: t.name, team: t.team, oppTeam: t.oppTeam, isAway: !!t.isAway,
+        batHand: t.hand || null, ord: t.ord ?? null,
+        oppSpId: t.oppSPId ?? null, oppSpHand: t.spHand || null,
+        // The two slugging inputs, already resolved through the four-layer
+        // fallback. slgSrc records which layer answered — without it a bad TB
+        // number cannot be attributed to the model rather than to missing data.
+        batterSLGvsSP: t.batterSLG, pitcherSLGvsBatter: t.pitcherSLG,
+        slgSrc: t.slgSrc || 'unknown',
+        parkHR: t.parkHR ?? null, parkRun: t.parkRun ?? null,
+        tempF: t.temp ?? null, weff: t.windDir === 'none' ? null : t.windDir, dome: !!t.dome,
+        mktLine: t.propLine ?? null, mktOverPx: t.overPrice ?? null, mktUnderPx: t.underPrice ?? null,
+        // P(over) after removing the vig, stored in the same direction as the
+        // pitcher rows. edge_pts stays null on purpose: there is no probability
+        // model for total bases yet, so any "edge" here would be invented.
+        mktDevigProb: dv ? dv.pOver : null,
+        edgePts: null,
+        _localTbPct: t.pct, _localTbRaw: t.score,
+      });
+    }
+    return out;
+  },
+
+  // Third drift guard. Pitchers and YRFI already had one; TB did not, and that
+  // gap let the app and Worker disagree on ANCHOR.tbRaw with nothing complaining.
+  // tb_raw is checked tightly because it is a raw score; tb_pct is an integer
+  // percentile off a clamp, so it gets a half-point tolerance like YRFI.
+  checkBatterParity(sent, returned) {
+    const local = {};
+    for (const b of sent) local[b.batterId] = { pct: b._localTbPct, raw: b._localTbRaw };
+    const bad = [];
+    for (const row of returned) {
+      const a = local[row.batter_id];
+      if (!a) continue;
+      if (a.raw != null && row.tb_raw != null && Math.abs(a.raw - row.tb_raw) > 0.001)
+        bad.push({ id: row.batter_id, name: row.name, field: 'tb_raw', app: a.raw, worker: row.tb_raw });
+      else if (a.pct != null && row.tb_pct != null && Math.abs(a.pct - row.tb_pct) > 0.5)
+        bad.push({ id: row.batter_id, name: row.name, field: 'tb_pct', app: a.pct, worker: row.tb_pct });
+    }
+    return bad;
+  },
+
+  // Total bases from a box score batting line. MLB does expose stat.totalBases
+  // on some endpoints but not reliably on the boxscore, so it is derived from
+  // the hit components instead: TB = H + 2B + 2*3B + 3*HR. Returns null rather
+  // than 0 when the line is absent, because a batter who did not play and a
+  // batter who went 0-for-4 are different rows and must not settle the same way.
+  batterLine(box, pid) {
+    for (const side of ['away', 'home']) {
+      const p = box?.teams?.[side]?.players?.['ID' + pid];
+      const s = p?.stats?.batting;
+      if (s && Object.keys(s).length) return s;
+    }
+    return null;
   },
 
   // The YRFI parity check. Pitchers already had one; this closes half the gap
