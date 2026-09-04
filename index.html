@@ -667,6 +667,11 @@ canvas{max-width:100%}
 <div class="sbar">
   <div class="smsg" id="sMsg"><span style="color:var(--t3)">Pick a date to load the slate →</span></div>
   <div class="schips" id="sChips"></div>
+  <button class="btn" id="propsBtn" onclick="loadPropsManually()"
+    style="font-size:11px;padding:4px 11px;flex-shrink:0"
+    title="Fetch player prop lines. Costs one API credit per market per game, so it is deliberately manual.">
+    ⚡ Load Props
+  </button>
 </div>
 
 <!-- SLATE BAR -->
@@ -679,11 +684,6 @@ canvas{max-width:100%}
   <div class="ss" id="sbPFWrap" title="Number of games with a clear pitching advantage — one starter significantly outperforms the other"><span class="ss-l">P-FAV</span><span class="ss-v b" id="sbPF">—</span></div>
   <div class="ss" id="sbOvWrap" title="Games where the model favors the over — weak pitching, strong offenses, hitter-friendly park and weather all pointing the same direction"><span class="ss-l">OVER ENV</span><span class="ss-v r" id="sbOv">—</span></div>
   <div class="ss" id="sbStkWrap" style="display:none"><span class="ss-l">TOP STACK</span><span class="ss-v" style="color:var(--pu)" id="sbStk">—</span></div>
-  <button class="btn" id="propsBtn" onclick="loadPropsManually()"
-    style="margin-left:8px;font-size:12px;padding:5px 14px;flex-shrink:0"
-    title="Fetch player prop lines. Costs API credits — one per market per game — so it is deliberately not automatic.">
-    ⚡ Load Props
-  </button>
   <button class="btn" id="summaryBtn" onclick="generateSlateSummary()"
     style="margin-left:8px;font-size:12px;padding:5px 14px;background:var(--g);flex-shrink:0"
     title="AI-generated slate breakdown — powered by Claude">
@@ -889,8 +889,8 @@ const ODDS_GAME_KEY = '15313f018353764b172b5564f8c547a1';
 // Comment out what you do not use.
 const PROP_MARKETS = [
   'pitcher_strikeouts',      // feeds the K PROP slot and pitcher market columns
-  'batter_total_bases',      // feeds the TB PROP slot and pred_batter market columns
-  'batter_home_runs',        // feeds the HR PROP slot only; has a model-only fallback
+  // 'batter_total_bases',   // TB PROP slot + pred_batter market columns — falls back to model
+  // 'batter_home_runs',     // HR PROP slot only — falls back to model
 ];
 const ODDS_PROP_KEY = '6782014ed2e04a7ac6fdaa741afa172f';
 
