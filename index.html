@@ -906,7 +906,7 @@ const YRFI_PROXY_SPREAD = 0.10;
 // and the 5-start version demonstrably did. Shrinkage handles thin samples by
 // weighting them down instead of excluding them, so there is no threshold whose
 // value changes the character of the answer.
-//   offGames 25 — a team has ~40 games in a 45-day window, so w ~ 0.62
+//   offGames 100 — a team has ~40 games in a 45-day window, so w ~ 0.29
 //   spStarts 30 — a starter averages only 5.9 first innings in the window, so
 //                 w ~ 0.16 and most of his number comes from his control-stats
 //                 prior. That is the correct split for a rate estimated on six
@@ -921,10 +921,15 @@ const YRFI_PROXY_SPREAD = 0.10;
 // and backtest agree, which is the only reason this moved at all — neither on
 // its own would justify it. 30 is the conservative end of the theory range.
 //
-// offGames is UNCHANGED. There is no separate evidence the team term is
-// over-dispersed, and moving both at once would make the next report
-// uninterpretable. One change, one measurement.
-const YRFI_STAB = { offGames: 25, spStarts: 30 };
+// offGames was 25 and is now 100, for the same reason and by the same
+// derivation. Shrinking the pitcher term alone barely moved the calibration
+// slope (0.50 -> 0.50) because the team term was left carrying most of the
+// over-dispersion. The arithmetic: a 40-game team sample has binomial noise of
+// SD 0.072, while teams genuinely differ by only SD 0.025-0.045 (real spread
+// is roughly 24%-34%). Signal share is therefore 0.11-0.28, implying k of
+// 100-330. At 25 the term was weighted 0.62 — more than twice what the data
+// supports. 100 is the least-aggressive end of the range.
+const YRFI_STAB = { offGames: 100, spStarts: 30 };
 
 // log5 on probabilities in [0,1]. The Worker's log5() takes percentages and is
 // used by the K model; this is the same odds-ratio combination on a 0..1 scale.
@@ -7980,14 +7985,41 @@ const FL = {
   // ── Settle ──
   // Self-healing: queries for anything still unresolved from earlier dates and
   // fills it in. Skip a week and the next load catches up on all of it.
+  // Drains every pending row instead of one capped batch.
+  //
+  // fetch-unsettled applies its LIMIT per table, so a single pass settled at
+  // most 300 pitchers and 300 games and then stopped. The report read
+  // "300 / 838" and looked exactly like a finished settle that had lost rows,
+  // which is the same failure shape as everything else in this file: a capped
+  // result indistinguishable from a complete one. Three separate reports were
+  // misread because of it, and every one of them was recency-skewed, because
+  // fetch-unsettled orders by date DESC.
+  //
+  // MAX_PASSES bounds it so a permanently-stuck row cannot spin forever;
+  // settle_attempts < 5 already stops individual rows, this stops the loop.
   async settleOpen() {
     if (!this.isAdmin()) return;
+    const MAX_PASSES = 8;
+    let pass = 0, drained = false;
+    while (pass < MAX_PASSES && !drained) {
+      pass++;
+      const more = await this._settlePass(pass);
+      drained = !more;
+    }
+    if (!drained) console.warn(`[FL] settle stopped after ${MAX_PASSES} passes — rows may remain pending. Reload to continue.`);
+  },
+
+  async _settlePass(pass) {
+    if (!this.isAdmin()) return false;
     try {
-      const un = await this.call('fetch-unsettled', { beforeDate: todayISO(), limit: 300 });
+      const LIMIT = 300;
+      const un = await this.call('fetch-unsettled', { beforeDate: todayISO(), limit: LIMIT });
       const rows     = un.rows?.pitchers || [];
       const gameRows = un.rows?.games    || [];
       const batRows  = un.rows?.batters  || [];
-      if (!rows.length && !gameRows.length && !batRows.length) return;
+      if (!rows.length && !gameRows.length && !batRows.length) return false;
+      // Any table coming back full means the cap was hit and more remain.
+      const capped = rows.length >= LIMIT || gameRows.length >= LIMIT || batRows.length >= LIMIT;
 
       // Pitcher and batter rows are grouped together so a game's box score is
       // fetched once and serves both.
@@ -8141,10 +8173,13 @@ const FL = {
         const done = a => a.filter(x => x.state === 'settled').length;
         console.log(`[FL] settled ${res.settled}, voided ${res.voided}`
           + ` (p ${done(results)}/${results.length} · b ${done(batResults)}/${batResults.length}`
-          + ` · g ${done(gameResults)}/${gameResults.length})`);
+          + ` · g ${done(gameResults)}/${gameResults.length})`
+          + (capped ? ` · pass ${pass}, more pending` : ` · pass ${pass}, drained`));
       }
+      return capped;
     } catch (e) {
       console.warn('[FL] settle failed (app unaffected):', e.message);
+      return false;
     }
   },
 
