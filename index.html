@@ -900,10 +900,28 @@ const LEAGUE_F1_SIDE = 0.293;
 // Deliberately small: the true spread in P(allows a run in the 1st) across
 // starters is narrow, and the previous version's wide swings were noise.
 const YRFI_PROXY_SPREAD = 0.10;
-// Starts of first-inning data required before the measured rate is used at all.
-// At a 20-day window most starters had exactly 3-4, so this gate was deciding
-// the answer. At 45 days a healthy starter clears it comfortably.
-const MIN_SP_STARTS = 5;
+// Shrinkage half-weights: the sample size at which an observed rate is trusted
+// 50/50 against its prior. There is no minimum-sample GATE anywhere in YRFI any
+// more — a gate creates two populations that do not average to the same place,
+// and the 5-start version demonstrably did. Shrinkage handles thin samples by
+// weighting them down instead of excluding them, so there is no threshold whose
+// value changes the character of the answer.
+//   offGames 25 — a team has ~40 games in a 45-day window, so w ~ 0.62
+//   spStarts 10 — a starter has ~7-9, so w ~ 0.42; the rest comes from his
+//                 control-stats prior, which is the right split for an estimate
+//                 built on that few first innings
+const YRFI_STAB = { offGames: 25, spStarts: 10 };
+
+// log5 on probabilities in [0,1]. The Worker's log5() takes percentages and is
+// used by the K model; this is the same odds-ratio combination on a 0..1 scale.
+// Combines a batting rate and a pitching rate against a league baseline without
+// the tail compression a weighted average produces.
+function log5p(p, o, l) {
+  if (!(p > 0 && p < 1 && o > 0 && o < 1 && l > 0 && l < 1)) return null;
+  const n = (p * o) / l;
+  const d = n + ((1 - p) * (1 - o)) / (1 - l);
+  return d > 0 ? n / d : null;
+}
 
 const MLB_BASE   = 'https://statsapi.mlb.com/api/v1';
 const WX_BASE    = 'https://api.open-meteo.com/v1/forecast';
@@ -2044,7 +2062,7 @@ async function fetchYRFI(games) {
   // touches the model again.
   const spF1Map = {}; // spId -> { p, n, era }
   for (const [spId, starts] of Object.entries(spFIERAMap)) {
-    if (starts.length < MIN_SP_STARTS) continue;
+    if (!starts.length) continue;
     const scored    = starts.filter(s => s.inn1Allowed > 0).length;
     const totalRuns = starts.reduce((s, g) => s + g.inn1Allowed, 0);
     spF1Map[spId] = {
@@ -2054,88 +2072,100 @@ async function fetchYRFI(games) {
     };
   }
 
-  // SP vulnerability, on the SAME scale as team offense: P(allows a run in 1st).
+  // SP vulnerability: P(this starter allows a run in the 1st).
   //
   // spId is passed in EXPLICITLY. It used to be read off the pitcher object as
   // `sp.id || sp.player_id`, and mkEmptySP() sets neither — the MLB id lives on
-  // the game as g.away_sp_id / g.home_sp_id and never on the pitcher object.
-  // So the lookup returned undefined for every starter in every game and the
-  // measured branch was unreachable from the day it was written. The Model
-  // Report's branch table read 806 proxy / 0 measured, which is what exposed it.
+  // the game as g.away_sp_id / g.home_sp_id and never on the pitcher object, so
+  // the measured branch was unreachable from the day it was written.
   //
-  // Everything downstream still worked, which is the problem: teamData kept
-  // collecting first-inning starts, spF1Map kept getting built, and the tooltip
-  // kept displaying first-inning ERA off the CORRECT key (g.away_sp_id), so a
-  // dot could show real first-inning data next to a number computed from the
-  // BB/WHIP proxy. Two paths to the same map, one wired right, one wrong.
+  // THERE IS NO LONGER A MINIMUM-STARTS GATE. There used to be, and it created
+  // two populations that did not average to the same place: qualifying starters
+  // measured ~25.4% while everyone below the gate — openers, call-ups, spot
+  // starts, injury returns — was handed a flat league average of 29.3% despite
+  // the arithmetic implying that group actually runs near 40%. A fallback
+  // describing a population it does not belong to, which is the same failure
+  // shape as everything else in this file.
+  //
+  // Instead the BB/WHIP proxy is now the PRIOR, and whatever measured starts
+  // exist get blended toward it in proportion to how many there are. A pitcher
+  // with no starts sits exactly on the proxy. One start moves him ~9% of the
+  // way to his own rate. Ten starts, halfway. There is no cliff anywhere, and
+  // no threshold whose value changes the character of the answer.
   function spVuln(sp, spId) {
     const rec = spId ? spF1Map[spId] : null;
-    if (rec) return { v: rec.p, src: 'f1', n: rec.n };
 
-    // Proxy branch, for starters without enough first innings in the window.
-    //
-    // The old proxy returned 0.40 for a league-average starter while the data
-    // branch returned ~0.50 for the same man, and which branch he landed on
-    // depended on whether a rainout pushed him under three starts. That is
-    // ~10 points of noise assigned at random, which is a large part of why the
-    // calibration buckets came back flat.
-    //
-    // Both branches now target LEAGUE_F1_SIDE for an average pitcher, and the
-    // proxy only moves him off it by a bounded amount. Control is deliberately
-    // tighter than raw stuff: walks put men on before anyone has to hit.
+    // The prior: a control-stats estimate, centred on the league rate so an
+    // average pitcher lands on the average.
     const bb9  = parseFloat(sp?.bb9)  || 3.0;
     const whip = parseFloat(sp?.whip) || 1.30;
-    if (!Number.isFinite(bb9) || !Number.isFinite(whip)) {
-      return { v: LEAGUE_F1_SIDE, src: 'league', n: 0 };
+    let prior = LEAGUE_F1_SIDE, priorOk = false;
+    if (Number.isFinite(bb9) && Number.isFinite(whip)) {
+      const dev = ((bb9 - 3.00) / 3.00) * 0.60 + ((whip - 1.30) / 0.80) * 0.40;
+      prior = Math.min(0.60, Math.max(0.12, LEAGUE_F1_SIDE + dev * YRFI_PROXY_SPREAD));
+      priorOk = true;
     }
-    const bbDev   = (bb9  - 3.00) / 3.00;  // +1 = 3 BB/9 worse than average
-    const whipDev = (whip - 1.30) / 0.80;  // +1 = 0.8 WHIP worse than average
-    const dev = bbDev * 0.60 + whipDev * 0.40;
-    const v = LEAGUE_F1_SIDE + dev * YRFI_PROXY_SPREAD;
-    return { v: Math.min(0.60, Math.max(0.12, v)), src: 'proxy', n: 0 };
+
+    if (!rec) return { v: prior, src: priorOk ? 'proxy' : 'league', n: 0, w: 0 };
+
+    const w = rec.n / (rec.n + YRFI_STAB.spStarts);
+    return { v: rec.p * w + prior * (1 - w), src: 'f1', n: rec.n, w: R(w, 3) };
   }
 
   for (const g of games) {
-    // Fallback moved off a hardcoded 0.42. The real per-side rate is ~0.29,
-    // so 0.42 was a third scale error stacked on the other two, and it was
-    // indistinguishable from a team that genuinely sat at 0.42.
+    // Team offense, shrunk toward the league per-side rate. ~40 games in a
+    // 45-day window gives w = 40/(40+25) = 0.62, so a team keeps most of its
+    // own signal while a short-sample team is pulled to the middle rather than
+    // being trusted at face value.
     const awayTeam = teamDataMap[g.away_id];
     const homeTeam = teamDataMap[g.home_id];
-    const offAway  = awayTeam?.yrfiPct ?? LEAGUE_F1_SIDE;
-    const offHome  = homeTeam?.yrfiPct ?? LEAGUE_F1_SIDE;
+    const shrinkOff = (t) => {
+      const n = t?.yrfiN ?? 0, obs = t?.yrfiPct;
+      if (obs == null || !n) return { v: LEAGUE_F1_SIDE, n: 0, w: 0 };
+      const w = n / (n + YRFI_STAB.offGames);
+      return { v: obs * w + LEAGUE_F1_SIDE * (1 - w), n, w: R(w, 3) };
+    };
+    const oA = shrinkOff(awayTeam), oH = shrinkOff(homeTeam);
 
     // Away team bats top of 1st vs home SP; home team bats bottom vs away SP.
     // The ids come off the game object, which is the only place they exist.
     const vH = spVuln(g.hsp, g.home_sp_id);
     const vA = spVuln(g.asp, g.away_sp_id);
 
-    const yrfiAway = offAway * 0.60 + vH.v * 0.40;
-    const yrfiHome = offHome * 0.60 + vA.v * 0.40;
+    // log5, not a weighted average.
+    //
+    // Averaging a batting rate against a pitching rate compresses everything
+    // toward the middle and throws away both tails — which is why the old
+    // buckets were flat. log5 is the standard odds-ratio combination and is
+    // already used by the K model at the top of the Worker. Same operator,
+    // finally applied here.
+    const pAway = log5p(oA.v, vH.v, LEAGUE_F1_SIDE);
+    const pHome = log5p(oH.v, vA.v, LEAGUE_F1_SIDE);
 
     // P(at least one scores in 1st) = 1 - P(neither scores).
     // Independence is an approximation — both halves share a park, a ball and
-    // an umpire — and it biases this slightly high. Left alone in this pass so
-    // the scale fix can be measured on its own.
-    const gameYRFI = 1 - (1 - yrfiAway) * (1 - yrfiHome);
+    // an umpire — and it biases this slightly high.
+    const gameYRFI = 1 - (1 - pAway) * (1 - pHome);
 
     const aspId = g.away_sp_id;
     const hspId = g.home_sp_id;
 
     g.yrfi = {
-      // Raw 0..1 inputs. Both are now probabilities on the same scale, and both
-      // are persisted to pred_game so a future formula change can be replayed
-      // against rows that already exist instead of needing a fresh backfill.
-      offAway, offHome, vulnAway: vA.v, vulnHome: vH.v,
-      offAwayN: awayTeam?.yrfiN ?? 0, offHomeN: homeTeam?.yrfiN ?? 0,
+      // The SHRUNK inputs, which are what the model actually consumed. Sample
+      // sizes travel with them so the Worker can reproduce the same numbers and
+      // so any future formula change is replayable against existing rows.
+      offAway: oA.v, offHome: oH.v, vulnAway: vA.v, vulnHome: vH.v,
+      offAwayN: oA.n, offHomeN: oH.n,
       aspSrc: vA.src, hspSrc: vH.src, aspN: vA.n, hspN: vH.n,
       pct:          Math.round(gameYRFI * 100),
-      awayPct:      Math.round(yrfiAway * 100),
-      homePct:      Math.round(yrfiHome * 100),
+      awayPct:      Math.round(pAway * 100),
+      homePct:      Math.round(pHome * 100),
       awayFromData: awayTeam?.yrfiPct != null,
       homeFromData: homeTeam?.yrfiPct != null,
       // Display only — never fed back into the model.
       aspFIERA:     aspId && spF1Map[aspId] ? spF1Map[aspId].era : null,
       hspFIERA:     hspId && spF1Map[hspId] ? spF1Map[hspId].era : null,
+      aspW: vA.w, hspW: vH.w,
     };
   }
 
@@ -2155,7 +2185,7 @@ async function fetchYRFI(games) {
       + `spF1Map has ${Object.keys(spF1Map).length} pitchers in it. If that number is non-zero the id lookup is broken again.`);
   } else if (sides && measured / sides < 0.4) {
     console.warn(`[YRFI] only ${measured}/${sides} starters used measured data (${Math.round(measured/sides*100)}%). `
-      + `Expected most starters to clear ${MIN_SP_STARTS} starts in a 45-day window.`);
+      + `Expected most starters to have at least one logged start in a 45-day window.`);
   }
 }
 
@@ -4873,15 +4903,31 @@ function showGuide() {
       icon: '📍',
       title: 'YRFI Strip',
       color: 'var(--bl)',
-      body: `<p>First-inning run likelihood for every game. Each dot is a game on a <b style="color:#0a84ff">blue → </b><b style="color:#ffd60a">yellow → </b><b style="color:#ff453a">red</b> gradient. Both tails are actionable; the middle is correctly ignorable.</p>
-<p style="margin:8px 0 6px;font-family:var(--fm);font-size:12px;color:var(--t2)">P(team scores in 1st) × 0.60 + P(opposing SP allows a run in 1st) × 0.40<br>
-game YRFI = 1 − (1 − away) × (1 − home)</p>
-<p>Both inputs are <b>probabilities on the same scale</b>, measured over a 45-day window. The pitcher term is the fraction of his starts in which he allowed a run in the first, needing at least 5 starts of data; below that it falls back to a BB/9 and WHIP proxy centred on the same league rate. Hover any dot to see which source each side used and how many starts are behind it.</p>
-<p style="margin-top:8px"><b style="color:var(--y)">Read this one with suspicion.</b> Until <b>FEATURE_REV 2</b> the pitcher term was mean <i>runs</i> allowed in the first, not a probability — roughly 1.8× too large — and it was being averaged against a probability. Every game came out high and the calibration buckets were flat, meaning the numbers moved but told you nothing. That is fixed, but the fix is unproven until enough settled games accumulate. Check the <b>Model Report</b> before betting this module: if the Brier score is not below the base-rate baseline, the strip is still decoration.</p>
-<p style="margin-top:8px">Expect a <b>narrow</b> spread. The real range of first-inning scoring probability across matchups is roughly 42–58%. A YRFI model showing you 30% and 75% games is not finding edges, it is miscalibrated.</p>`
+      body: `<p>First-inning run likelihood for every game. Each dot is a game on a <b style="color:#0a84ff">blue \u2192 </b><b style="color:#ffd60a">yellow \u2192 </b><b style="color:#ff453a">red</b> gradient. Both tails are actionable; the middle is correctly ignorable.</p>
+
+<p style="margin-top:10px"><b style="color:var(--t)">How it works, in order.</b></p>
+<ol style="margin:6px 0 0 18px;line-height:2">
+  <li><b>Two inputs, same units.</b> P(this team scores in the 1st) and P(the opposing starter allows a run in the 1st). Both are probabilities, both measured over a 45-day window, both centred on the same league rate of <b>29.3%</b> \u2014 the per-side rate implied by a game-level YRFI near 50%.</li>
+  <li><b>Both get shrunk.</b> An observed rate is blended toward a prior in proportion to how much data sits behind it. Team offense shrinks toward the league rate (half-weight at 25 games). A starter shrinks toward his own control-stats estimate from BB/9 and WHIP (half-weight at 10 starts). A pitcher with one start barely moves off his prior; one with twenty is mostly his own number.</li>
+  <li><b>They combine with log5</b>, the odds-ratio formula \u2014 the same one the strikeout model uses. Not a weighted average.</li>
+  <li><b>Game YRFI = 1 \u2212 (1 \u2212 away) \u00d7 (1 \u2212 home)</b>, the chance at least one side scores.</li>
+</ol>
+
+<p style="margin-top:10px"><b style="color:var(--t)">Why there is no minimum-starts rule.</b> There used to be one: five starts of first-inning data or you got a flat league average instead. That split starters into two groups that did not average to the same place. The ones who qualified ran about <b>25.4%</b>; the ones who did not \u2014 openers, call-ups, spot starts, injury returns \u2014 ran closer to <b>40%</b> and were handed 29.3% anyway. A threshold that changes the character of an answer is worse than no threshold. Shrinkage weights thin samples down instead of throwing them out, so there is no cliff anywhere.</p>
+
+<p style="margin-top:10px"><b style="color:var(--y)">Three bugs this module has had, because they explain the numbers.</b></p>
+<ul style="margin:6px 0 0 18px;line-height:1.9">
+  <li><b>Wrong units.</b> The pitcher term was mean <i>runs</i> allowed in the first, averaged against a probability. Mean runs is about 1.8\u00d7 the scoring rate, because a three-run first counts as 3.0 in a mean and as one event in a rate.</li>
+  <li><b>A dead branch.</b> The measured first-inning data was looked up with <code>sp.id</code>, a field the pitcher object never had. It returned undefined for every starter in every game, so the branch was unreachable from the day it was written and 100% of pitchers silently used the fallback. The Model Report's branch table is what exposed it \u2014 806 proxy, 0 measured.</li>
+  <li><b>A mis-centred fallback.</b> That fallback returned 0.40 for an average pitcher against a true 0.293, which was the whole of the roughly 7-point over-prediction.</li>
+</ul>
+
+<p style="margin-top:10px"><b style="color:var(--t)">How to read it.</b> Expect a <b>narrow</b> spread. Real first-inning scoring probability across matchups runs roughly 42\u201358%. A YRFI model showing 30% and 75% games is not finding edges, it is miscalibrated. Hover any dot for the per-side breakdown, which source each starter's number came from, and how many starts are behind it.</p>
+
+<p style="margin-top:10px"><b style="color:var(--r)">Check the Model Report before betting this.</b> Three panels cover it: the calibration table and Brier score, the input scale check (both inputs should sit within 5 points of the observed per-side rate), and the prior-centring table (whether starters with no measured data are being rated correctly). A Brier gap under 0.004 is reported as a tie, not a win \u2014 at a few hundred games that is inside the noise.</p>`
     },
     {
-      icon: '⚡',
+      icon: '\u26a1',
       title: 'Strikeout Model',
       color: 'var(--g)',
       body: `<p>One K score in the app, shared by the Overview scatter and the K Board. There is deliberately no second, slightly-different K number anywhere.</p>
@@ -7580,10 +7626,20 @@ function renderModelReport() {
   ]);
   let yVerdict = '';
   if (y) {
-    const beats = y.brier < y.brierBaseline;
-    yVerdict = `<div style="margin-top:12px;padding:10px 12px;border-radius:var(--r1);background:${beats ? 'var(--gd)' : 'var(--rd)'};border:1px solid ${beats ? 'var(--g)' : 'var(--r)'};font-size:11.5px;color:var(--t2);line-height:1.6">
+    // A bare `brier < baseline` renders a 0.0002 margin in the same green as a
+    // real one. At n=403 that difference is far inside the noise, so a tie was
+    // reading as a win. MARGIN is the gap below which the two are called even.
+    const MARGIN = 0.004;
+    const diff  = y.brierBaseline - y.brier;
+    const beats = diff >= MARGIN;
+    const tied  = Math.abs(diff) < MARGIN;
+    const bg  = beats ? 'var(--gd)' : tied ? 'var(--bg3)' : 'var(--rd)';
+    const bor = beats ? 'var(--g)'  : tied ? 'var(--b1)'  : 'var(--r)';
+    yVerdict = `<div style="margin-top:12px;padding:10px 12px;border-radius:var(--r1);background:${bg};border:1px solid ${bor};font-size:11.5px;color:var(--t2);line-height:1.6">
       ${beats
-        ? `Brier ${mrNum(y.brier, 4)} beats the ${mrNum(y.brierBaseline, 4)} a model that always guessed the base rate would score. The inputs are contributing.`
+        ? `Brier ${mrNum(y.brier, 4)} beats the ${mrNum(y.brierBaseline, 4)} a model that always guessed the base rate would score, by ${mrNum(diff, 4)}. The inputs are contributing.`
+        : tied
+        ? `Brier ${mrNum(y.brier, 4)} against a base-rate baseline of ${mrNum(y.brierBaseline, 4)} — a gap of ${mrNum(Math.abs(diff), 4)}, which is <b style="color:var(--y)">inside the noise</b> at this sample size. The module has stopped being worse than guessing. It is not yet demonstrably better. Treat anything under ${MARGIN} as a tie.`
         : `Brier ${mrNum(y.brier, 4)} is <b style="color:var(--r)">worse</b> than the ${mrNum(y.brierBaseline, 4)} a model that ignored every input and always guessed ${mrPct(y.baseRate)} would score. The inputs are not currently contributing.`}
     </div>`;
   }
@@ -7625,15 +7681,36 @@ function renderModelReport() {
       ])
       + `<div style="font-family:var(--fm);font-size:9.5px;letter-spacing:.8px;color:var(--t3);text-transform:uppercase;margin:16px 0 7px">Where the pitcher term came from · ${spTotal} sides</div>`
       + mrTable(['Source', 'Sides', 'Share', 'What it means'], [
-          ['measured',      mrN(yi.sp_from_f1),     pctOf(yi.sp_from_f1),     `${MIN_SP_STARTS}+ starts of real first-inning data`],
-          ['BB/WHIP proxy', mrN(yi.sp_from_proxy),  pctOf(yi.sp_from_proxy),  'not enough starts — inferred from control stats'],
-          ['league avg',    mrN(yi.sp_from_league), pctOf(yi.sp_from_league), 'no usable stats at all'],
+          ['measured',      mrN(yi.sp_from_f1),     pctOf(yi.sp_from_f1),     'has first-inning starts; blended with his prior by sample size'],
+          ['prior only',    mrN(yi.sp_from_proxy),  pctOf(yi.sp_from_proxy),  'no starts in window — control-stats estimate alone'],
+          ['league avg',    mrN(yi.sp_from_league), pctOf(yi.sp_from_league), 'no starts and no usable control stats'],
         ])
       + `<div style="margin-top:12px;padding:10px 12px;border-radius:var(--r1);background:${scaleBad ? 'var(--rd)' : 'var(--gd)'};border:1px solid ${scaleBad ? 'var(--r)' : 'var(--g)'};font-size:11.5px;color:var(--t2);line-height:1.6">
           ${scaleBad
             ? `One or both inputs sit more than 5 points off the observed per-side rate. That is a <b style="color:var(--r)">scale</b> problem, not a tuning problem — the term is measuring the wrong quantity, and no weight change fixes it.`
             : `Both inputs sit within 5 points of the observed per-side rate, so they are on the correct scale. Whatever error remains is discrimination, not level — that is what log5 and shrinkage are for.`}
         </div>`));
+
+    // Observed vs assumed, split by which population the starter fell into.
+    // The removed 5-start gate was justified by arithmetic; this measures it.
+    const srcRows = (d.yrfiBySrc || []).map(r => [
+      r.src === 'f1' ? 'has measured starts' : r.src === 'proxy' ? 'prior only' : 'league avg',
+      mrN(r.n), mrNum(r.mean_starts, 1), mrPct(r.assumed_rate), mrPct(r.observed_rate),
+      mrSigned((r.assumed_rate - r.observed_rate) * 100, 1) + ' pts',
+    ]);
+    if (srcRows.length) {
+      out.push(mrSection('First inning — is the prior centred?',
+        'One row per starter per game. What the model assumed about each starter, next to how often that starter actually allowed a first-inning run. A large gap on the prior-only row means the control-stats estimate is describing a population it does not belong to — which is exactly what the removed minimum-starts gate was doing.',
+        mrTable(['Starter population', 'Sides', 'Mean starts', 'Assumed', 'Observed', 'Gap'], srcRows)
+        + `<div style="margin-top:10px;font-size:11px;color:var(--t3);line-height:1.6">
+             Gap is assumed minus observed, so positive means the model over-rated that group.
+             The prior-only row is the one to watch: those starters have no first-inning data,
+             so their number is entirely a guess from BB/9 and WHIP. If it reads several points
+             low, <code style="color:var(--t2)">LEAGUE_F1_SIDE</code> is the wrong anchor for
+             them and the prior needs its own centre. No constant changes off this without a
+             second look at a larger sample.
+           </div>`));
+    }
   }
 
   // ── 7. market ──
