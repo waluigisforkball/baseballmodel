@@ -1314,35 +1314,8 @@ async function load(date, asOf = null) {
     fetchTBSplits(); // async, non-blocking — populates S.tbSplits when ready
     renderGameFilterChips();
     renderSlate();
-    const bpCount = raw.filter(g=>g.away_bp?.era||g.home_bp?.era).length;
-    const propCount = Object.keys(S.playerProps||{}).length;
-    const chips = [{cls:'live',txt:'MLB API ✓'},{cls:'wx',txt:'Weather ✓'},{cls:'live',txt:`BP: ${bpCount*2} teams`}];
-    // Always render a props chip. Previously it appeared only on success, so a
-    // total failure rendered NO chip and was indistinguishable from a normal load
-    // at a glance — the visible 'Odds ✓' next to it refers to game lines on a
-    // different key and stays green while props are dead.
-    if (propCount) {
-      const left = S.propsRemaining;
-      chips.push({
-        cls: (left != null && left < 50) ? 'err' : 'odds',
-        txt: `Props: ${propCount} games` + (left != null ? ` · ${left} left` : ''),
-      });
-    } else {
-      const e = S.propsErr;
-      const why = !e ? 'not loaded — press ⚡ Load Props'
-        : e.code === 'OUT_OF_USAGE_CREDITS' ? 'OUT OF CREDITS'
-        : e.status === 401 ? 'key rejected'
-        : e.code === 'NETWORK' ? 'network'
-        : `error ${e.status}`;
-      chips.push({ cls: S.propsErr ? 'err' : '', txt: `${S.propsErr ? '⚠ ' : ''}Props: ${why}` });
-    }
-    if (S.oddsOk) chips.push({cls:'odds',txt:'Odds ✓ (lines)'}); else chips.push({cls:'err',txt:'⚠ Odds: No data'});
-    if (S.aiDone.size) chips.push({cls:'ai',txt:'AI: '+S.aiDone.size+' enriched'});
-    if (S._injuries?.length) chips.push({cls:'err',txt:'IL: '+S._injuries.length+' players'});
-    const winLabel = S.activePreset==='season'?'This Season':S.activePreset==='lastseason'?'Last Season':S.activePreset==='custom'?(S.statsStart+'→'+S.statsEnd):('Last '+S.days+'d');
-    chips.push({cls:'',txt:'Window: '+winLabel});
-    chips.push({cls:S.oddsWt>0?'odds':'',txt:'Edges Odds Wt: '+S.oddsWt+'%'});
-    setChips(chips);
+    S._bpCount = raw.filter(g=>g.away_bp?.era||g.home_bp?.era).length;
+    renderStatusChips();
     setStatus('ok', raw.length + ' games loaded');
     // Recent-form (L3) data is an INPUT to the projection, so it must exist before
     // anything is logged. Previously it loaded lazily on the Bet Boards tab, which
@@ -1790,7 +1763,24 @@ async function fetchOdds(games) {
       let lastErr;
       for (let keyAttempt = 0; keyAttempt < ODDS_API_KEYS.length; keyAttempt++) {
         const oddsUrl = `${ODDS_BASE}/sports/baseball_mlb/odds?apiKey=${getOddsKey()}&regions=us&markets=h2h,spreads,totals&oddsFormat=american&bookmakers=fanduel,draftkings,betmgm,caesars,pointsbet,bovada,betonlineag`;
-        // First try direct (works when served from localhost or hosted)
+        // Worker first — it caches, so repeat page loads across every visitor cost
+        // one fetch per TTL window rather than one each. Game lines are three
+        // credits a call (h2h + spreads + totals) and load() runs for everyone who
+        // opens the site, which was an unbounded drain on the game key.
+        try {
+          const r = await timedFetch(CF_WORKER_URL, 12000, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'odds-proxy', url: oddsUrl, ttl: 600 }),
+          });
+          if (r.ok) {
+            const parsed = JSON.parse(await r.text());
+            if (Array.isArray(parsed)) { data = parsed; _oddsCache[cacheKey] = { data, ts: Date.now() }; break; }
+          } else {
+            lastErr = new Error('HTTP ' + r.status);
+          }
+        } catch(e) { lastErr = e; }
+        // Then direct (works when served from localhost or hosted)
         try {
           data = await safeFetch(oddsUrl, 10000);
           if (Array.isArray(data)) { _oddsCache[cacheKey] = { data, ts: Date.now() }; break; }
@@ -2179,6 +2169,41 @@ function renderYRFIStrip() {
 // Markets: pitcher_strikeouts, batter_total_bases, batter_home_runs
 // ─────────────────────────────────────────────────────────────
 // Manual props fetch. Deliberately the only path that spends prop credits.
+// Status chips. Extracted from load() so that anything changing the underlying
+// state — notably the manual props fetch — can redraw them. While it lived
+// inline, pressing Load Props updated the data and left the chip still saying
+// "not loaded", which is the same failure mode as everything else here: the
+// display and the truth diverging with nothing to catch it.
+function renderStatusChips() {
+  const bpCount = S._bpCount || 0;
+  // S.playerProps is keyed by BOTH game_id and oddsEventId, so Object.keys()
+  // roughly double-counts. Count distinct games actually carrying props.
+  const propCount = (S.games || []).filter(g => S.playerProps?.[g.game_id]).length;
+  const chips = [{cls:'live',txt:'MLB API ✓'},{cls:'wx',txt:'Weather ✓'},{cls:'live',txt:`BP: ${bpCount*2} teams`}];
+  if (propCount) {
+    const left = S.propsRemaining;
+    chips.push({
+      cls: (left != null && left < 50) ? 'err' : 'odds',
+      txt: `Props: ${propCount} games` + (left != null ? ` · ~${left} left` : ''),
+    });
+  } else {
+    const e = S.propsErr;
+    const why = !e ? 'not loaded — press ⚡ Load Props'
+      : e.code === 'OUT_OF_USAGE_CREDITS' ? 'OUT OF CREDITS'
+      : e.status === 401 ? 'key rejected'
+      : e.code === 'NETWORK' ? 'network'
+      : `error ${e.status}`;
+    chips.push({ cls: e ? 'err' : '', txt: `${e ? '⚠ ' : ''}Props: ${why}` });
+  }
+  if (S.oddsOk) chips.push({cls:'odds',txt:'Odds ✓ (lines)'}); else chips.push({cls:'err',txt:'⚠ Odds: No data'});
+  if (S.aiDone.size) chips.push({cls:'ai',txt:'AI: '+S.aiDone.size+' enriched'});
+  if (S._injuries?.length) chips.push({cls:'err',txt:'IL: '+S._injuries.length+' players'});
+  const winLabel = S.activePreset==='season'?'This Season':S.activePreset==='lastseason'?'Last Season':S.activePreset==='custom'?(S.statsStart+'→'+S.statsEnd):('Last '+S.days+'d');
+  chips.push({cls:'',txt:'Window: '+winLabel});
+  chips.push({cls:S.oddsWt>0?'odds':'',txt:'Edges Odds Wt: '+S.oddsWt+'%'});
+  setChips(chips);
+}
+
 async function loadPropsManually() {
   const btn = document.getElementById('propsBtn');
   if (!S.games?.length) { showError('No slate', 'Load a slate first.'); return; }
@@ -2194,6 +2219,7 @@ async function loadPropsManually() {
     }
     // Prop lines feed the market columns and the Prop Targets strip, so redraw.
     S.games = S.games.map(g => ({ ...g, edges: computeEdges(g) }));
+    renderStatusChips();
     renderSlate();
   } catch (e) {
     showError('Props failed', e.message);
@@ -2294,7 +2320,7 @@ async function fetchAllPlayerProps(games) {
   const nProps = Object.keys(S.playerProps).length;
   if (nProps) {
     console.log(`Props fetched for ${nProps} games`
-      + (S.propsRemaining != null ? ` · ${S.propsRemaining} credits left` : ''));
+      + (S.propsRemaining != null ? ` · ~${S.propsRemaining} credits left (cached responses carry stale counts)` : ''));
   } else {
     console.warn('[props] NONE fetched —', S.propsErr
       ? `${S.propsErr.status} ${S.propsErr.code || ''} ${S.propsErr.msg || ''}`.trim()
