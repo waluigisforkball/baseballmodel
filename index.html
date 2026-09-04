@@ -7790,34 +7790,51 @@ const FL = {
       // discards startDate/endDate — so a historical batter row would carry
       // end-of-season splits against a mid-season date. Lookahead bias.
       const batters = this.buildBatterFeatures();
-      if (!pitchers.length && !batters.length) return;
+      // First-inning rows were only ever written by the backfill — onSlateLoaded
+      // built pitcher and batter features and silently skipped games, so no live
+      // slate has ever logged a YRFI prediction.
+      const games = this.buildGameFeatures();
+      if (!pitchers.length && !batters.length && !games.length) return;
 
       const scored = await this.call('score-date', {
         date, isBackfill: 0, lineupSource: 'real', wxSource: 'forecast',
-        features: { pitchers, batters },
+        features: { pitchers, batters, games },
       });
 
       // All three guards must pass before ANY table is written. A partial write
       // would leave the log internally inconsistent for that date.
       const drift  = this.checkParity(pitchers, scored.pitchers || []);
       const bDrift = this.checkBatterParity(batters, scored.batters || []);
-      if (drift.length || bDrift.length) {
+      const gDrift = this.checkGameParity(games, scored.games || []);
+      if (drift.length || bDrift.length || gDrift.length) {
         console.error('[FL] MODEL DRIFT — app and Worker disagree. NOTHING LOGGED.',
-          { pitchers: drift, batters: bDrift });
-        this.badge(`drift: ${drift.length + bDrift.length} rows`, '#ff453a');
+          { pitchers: drift, batters: bDrift, games: gDrift });
+        this.badge(`drift: ${drift.length + bDrift.length + gDrift.length} rows`, '#ff453a');
         return;
       }
 
       await this.call('log-predictions', {
-        rows: { pitchers: scored.pitchers, batters: scored.batters },
+        rows: { pitchers: scored.pitchers, batters: scored.batters, games: scored.games },
       });
-      const np = (scored.pitchers || []).length, nb = (scored.batters || []).length;
-      console.log(`[FL] logged ${np} pitchers · ${nb} batters · ${scored.modelVersion}`);
-      this.badge(`logged ${np}p ${nb}b`, '#00c97a');
+      const np = (scored.pitchers || []).length, nb = (scored.batters || []).length,
+            ng = (scored.games || []).length;
+      console.log(`[FL] logged ${np} pitchers · ${nb} batters · ${ng} games · ${scored.modelVersion}`);
+      this.badge(`logged ${np}p ${nb}b ${ng}g`, '#00c97a');
     } catch (e) {
       console.warn('[FL] log failed (app unaffected):', e.message);
       this.badge('log failed', '#ff9f0a');
     }
+  },
+
+  // Repairs rows voided on bad data. Requires an exact settle_note and a date
+  // range; the Worker additionally refuses to touch any row that already carries
+  // an outcome. Nothing is deleted — voided rows have NULL outcomes by
+  // definition, so this only restores them to the queue.
+  async requeueVoided(from, to, note = 'not in boxscore') {
+    if (!this.isAdmin()) { console.warn('[FL] admin only'); return; }
+    const r = await this.call('requeue-voided', { from, to, note });
+    console.log('[FL] requeued', r.requeued, '— reload to settle them');
+    return r;
   },
 
   // ── Settle ──
@@ -7902,8 +7919,27 @@ const FL = {
         }
         let box = null;
         try { box = await proxyFetch(`${MLB_BASE}/game/${gid}/boxscore`); } catch {}
+
+        // proxyFetch returns whatever JSON it received. A Worker error body or a
+        // degraded CORS proxy yields a truthy object with no teams key, which
+        // sails past `if (!box)`, fails every player lookup, and voids every row
+        // in the game as "not in boxscore" — terminally, with no delete action to
+        // undo it. That is exactly what happened on 2026-09-03: 137 of 137 rows
+        // voided while the proxies were returning 522s.
+        //
+        // So the shape is asserted before any void is allowed. A real MLB box
+        // score has a players map on both sides with a full roster in it; nine is
+        // a floor no legitimate response falls below. Anything else is a fetch
+        // problem and stays PENDING, which is recoverable, rather than void,
+        // which is not.
+        const side = k => box?.teams?.[k]?.players;
+        const boxOK = !!box && !!side('away') && !!side('home')
+          && Object.keys(side('away')).length >= 9
+          && Object.keys(side('home')).length >= 9;
+
         for (const r of byGame[gid]) {
-          if (!box) { push(r, { state: 'pending', note: 'boxscore unavailable' }); continue; }
+          if (!box)   { push(r, { state: 'pending', note: 'boxscore unavailable' }); continue; }
+          if (!boxOK) { push(r, { state: 'pending', note: 'boxscore malformed' });  continue; }
 
           if (r.batter_id != null) {
             const bs = this.batterLine(box, r.batter_id);
