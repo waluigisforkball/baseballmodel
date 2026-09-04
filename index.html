@@ -627,7 +627,6 @@ canvas{max-width:100%}
       <button class="mode-btn bet on" id="modeBet">🎲 BETTING</button>
       <button class="mode-btn dfs" id="modeDfs">💰 DFS</button>
     </div>
-    <button class="btn sec" id="rundownBtn" onclick="showRundown()" style="background:var(--bg3);border-color:var(--g);color:var(--g)">≡ Rundown</button>
     <button class="btn sec" id="guideBtn" onclick="showGuide()" style="background:var(--bg3);border-color:var(--y);color:var(--y)">? Guide</button>
     <button class="btn sec" id="refreshBtn">↺ Refresh</button>
   </div>
@@ -675,53 +674,33 @@ canvas{max-width:100%}
 </div>
 
 <!-- SLATE BAR -->
+<!-- One bar, not two. There used to be a slate bar and a prop bar stacked on
+     top of each other, and until props were loaded each market was computed
+     TWICE from slightly different formulas: TOP K and K PROP called the same
+     sK() and printed the same pitcher, while TOP TB and TB PROP dropped
+     different terms and could name different hitters on the same screen.
+     Now one row per market. It shows the model lean by default and upgrades
+     in place to the book line when props load, with a src tag saying which. -->
 <div class="slate-bar" id="slateBar" style="display:none">
   <div class="ss" title="Total games on today's slate"><span class="ss-l">GAMES</span><span class="ss-v" id="sbG">—</span></div>
-  <div class="ss" id="sbKWrap" title="Pitcher with the best strikeout matchup today — highest K/9 vs opposing lineup K rate"><span class="ss-l">TOP K</span><span class="ss-v g" id="sbK">—</span></div>
-  <div class="ss" id="sbHRWrap" title="Hitter with the best home run environment today — ISO vs pitcher hand, park HR factor, weather"><span class="ss-l">TOP HR</span><span class="ss-v o" id="sbHR">—</span></div>
-  <div class="ss" id="sbTBWrap" title="Hitter with the best total bases potential today — SLG/OPS vs pitcher hand"><span class="ss-l">TOP TB</span><span class="ss-v o" id="sbTB">—</span></div>
-  <div class="ss" id="sbValWrap" title="Team the model favors but the market prices as an underdog — potential moneyline value"><span class="ss-l">VALUE</span><span class="ss-v y" id="sbVal">—</span></div>
-  <div class="ss" id="sbPFWrap" title="Number of games with a clear pitching advantage — one starter significantly outperforms the other"><span class="ss-l">P-FAV</span><span class="ss-v b" id="sbPF">—</span></div>
-  <div class="ss" id="sbOvWrap" title="Games where the model favors the over — weak pitching, strong offenses, hitter-friendly park and weather all pointing the same direction"><span class="ss-l">OVER ENV</span><span class="ss-v r" id="sbOv">—</span></div>
+  <div class="ss" id="sbKWrap" title="Best strikeout target today. Shows the model's pick until you load props, then the best posted K line.">
+    <span class="ss-l">⚡ TOP K</span><span class="ss-v g" id="sbK">—</span>
+  </div>
+  <div class="ss" id="sbTBWrap" title="Best total-bases target today. Shows the model's pick until you load props, then the best posted TB line.">
+    <span class="ss-l">🟣 TOP TB</span><span class="ss-v" style="color:var(--pu)" id="sbTB">—</span>
+  </div>
+  <div class="ss" id="sbHRWrap" title="Best home run environment today — ISO vs pitcher hand, park HR factor, weather. DFS mode only; HR is not in PROP_MARKETS.">
+    <span class="ss-l">💣 TOP HR</span><span class="ss-v o" id="sbHR">—</span>
+  </div>
+  <div class="ss" id="sbFadeWrap" title="Most vulnerable starting pitcher today — high ERA/FIP against a strong lineup in a hitter-friendly park.">
+    <span class="ss-l">🚫 FADE SP</span><span class="ss-v" style="color:var(--t3)" id="sbFade">—</span>
+  </div>
   <div class="ss" id="sbStkWrap" style="display:none"><span class="ss-l">TOP STACK</span><span class="ss-v" style="color:var(--pu)" id="sbStk">—</span></div>
-  <button class="btn" id="summaryBtn" onclick="generateSlateSummary()"
-    style="margin-left:8px;font-size:12px;padding:5px 14px;background:var(--g);flex-shrink:0"
-    title="AI-generated slate breakdown — powered by Claude">
-    ✦ Slate Breakdown
+  <button class="btn sec" id="rundownBtn" onclick="showRundown()"
+    style="margin-left:auto;font-size:12px;padding:5px 14px;background:var(--bg3);border-color:var(--g);color:var(--g);flex-shrink:0"
+    title="Deterministic slate rundown — every module's tails, no API credits.">
+    ≡ Rundown
   </button>
-  <div class="frow" id="filterRow">
-    <button class="fchip on" data-f="all">All</button>
-    <button class="fchip" data-f="k">⚡K</button>
-    <button class="fchip" data-f="hr">💣HR</button>
-    <button class="fchip" data-f="over">↑Over</button>
-    <button class="fchip" data-f="under">↓Under</button>
-    <button class="fchip" data-f="value">💰Value</button>
-  </div>
-</div>
-
-<!-- PROP TARGETS BAR -->
-<div class="slate-bar" id="propBar" style="display:none;background:var(--bg);border-top:1px solid var(--b1)">
-  <span class="ss-l" style="color:var(--g);font-size:10px;font-weight:600;letter-spacing:1px" title="Player prop targets — sourced from live betting lines when available, model estimates as fallback">PROP TARGETS</span>
-  <div class="ss" id="pbKWrap" title="Best strikeout prop today. Format: Pitcher (Team) Line Price · Books. Price is avg across books. More books = stronger market consensus.">
-    <span class="ss-l">⚡ K PROP</span>
-    <span class="ss-v" style="color:var(--g);font-size:12px" id="pbK">—</span>
-  </div>
-  <div class="ss" id="pbHRWrap" title="Best home run prop today. Format: Hitter (Team) Price · Books. Higher book count = more reliable line.">
-    <span class="ss-l">💣 HR PROP</span>
-    <span class="ss-v" style="color:var(--r);font-size:12px" id="pbHR">—</span>
-  </div>
-  <div class="ss" id="pbTBWrap" title="Best total bases prop today. Format: Hitter (Team) Line Price · Books. TB props are heaviest-weighted in the model.">
-    <span class="ss-l">🟣 TB PROP</span>
-    <span class="ss-v" style="color:var(--pu);font-size:12px" id="pbTB">—</span>
-  </div>
-  <div class="ss" id="pbFadeWrap" title="Most vulnerable starting pitcher today — high ERA/FIP, strong opposing lineup, hitter-friendly park. Consider fading in DFS or targeting for team run totals.">
-    <span class="ss-l">🚫 FADE SP</span>
-    <span class="ss-v" style="color:var(--t3);font-size:12px" id="pbFade">—</span>
-  </div>
-  <div class="ss" id="pbValWrap" title="Team the model favors but the market has as an underdog. Format: Team +ML. Lean on this for ML value or run total bets.">
-    <span class="ss-l">💰 VALUE</span>
-    <span class="ss-v" style="color:var(--y);font-size:12px" id="pbVal">—</span>
-  </div>
 </div>
 
 <!-- YRFI STRIP -->
@@ -808,6 +787,21 @@ canvas{max-width:100%}
       <button class="btn" id="dfsUploadTabBtn" onclick="document.getElementById('dfsFileInput').click()" style="display:none;margin-left:auto;background:var(--pu);font-size:11px;padding:4px 13px">📂 Upload DK Salaries</button>
     </div>
     <div id="overviewView" style="display:none"></div>
+    <!-- The chips used to sit in the global slate bar, visible on all nine
+         tabs. S.filter is read in exactly one place — renderCards() — so on
+         every other tab a chip would light up and nothing would happen. They
+         live here now, where they do something. -->
+    <div id="cardsFilterWrap" style="display:none;padding:10px 0 12px">
+      <div class="frow" id="filterRow" style="margin:0">
+        <span style="font-size:9px;color:var(--t3);letter-spacing:1px;margin-right:4px;align-self:center">FILTER CARDS</span>
+        <button class="fchip on" data-f="all"   title="Every game on the slate.">All</button>
+        <button class="fchip" data-f="k"        title="Games where the K edge score is 6.1 or better — a starter with a real strikeout matchup.">⚡K</button>
+        <button class="fchip" data-f="hr"       title="Games where the HR environment score is 7.0 or better — power-friendly park, weather and matchup.">💣HR</button>
+        <button class="fchip" data-f="over"     title="Games scoring 7.5+ on the over side and leaning over. Matches the ↑OVER badge on the cards.">↑Over</button>
+        <button class="fchip" data-f="under"    title="Games scoring 7.0+ on the under side and leaning under. Matches the ↓UNDER badge on the cards.">↓Under</button>
+        <button class="fchip" data-f="value"    title="Games where the model's lean disagrees with the posted line — a short total on an over lean, a high total on an under lean, or a live long dog.">💰Value</button>
+      </div>
+    </div>
     <div id="cardsView" class="cgrid" style="display:none"></div>
     <div id="heatmapView" style="display:none"></div>
     <div id="tableView" style="display:none">
@@ -827,21 +821,6 @@ canvas{max-width:100%}
   </div>
 </main>
 
-<!-- GUIDE MODAL -->
-<div id="summaryModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:500;align-items:center;justify-content:center;padding:20px">
-  <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r3);max-width:700px;width:100%;max-height:80vh;overflow:hidden;display:flex;flex-direction:column">
-    <div style="padding:16px 20px;border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
-      <div style="font-size:15px;font-weight:600;color:var(--t)">✦ Slate Breakdown</div>
-      <button onclick="document.getElementById('summaryModal').style.display='none'"
-        style="background:none;border:none;color:var(--t3);cursor:pointer;font-size:20px;line-height:1;padding:2px 6px">✕</button>
-    </div>
-    <div id="summaryContent" style="padding:20px;overflow-y:auto;font-size:14px;line-height:1.8;color:var(--t2);flex:1">
-      <div id="summarySpinner" style="display:flex;align-items:center;gap:10px;color:var(--t3)">
-        <div class="spin"></div> Analyzing today's slate…
-      </div>
-    </div>
-  </div>
-</div>
 
 <div id="rundownModal" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.75);overflow-y:auto;padding:20px">
   <div style="max-width:760px;margin:0 auto;background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r3);overflow:hidden">
@@ -909,6 +888,22 @@ const ODDS_CACHE_MS      = 30 * 60 * 1000;
 const ODDS_PROP_CACHE_MS = 45 * 60 * 1000;
 // Store fetched player props — keyed by game_id
 // playerProps initialized in S state below
+
+// ── YRFI constants ───────────────────────────────────────────────────────
+// Per-side base rate: P(a given team scores in the first inning). Game-level
+// YRFI logs at ~50%, and 1 - sqrt(0.50) = 0.293 is the per-side rate that
+// implies under the independence assumption the model already makes. This is
+// the value both the team-offense fallback and the pitcher proxy centre on.
+// It must stay in step with LEAGUE_F1_SIDE in worker.js.
+const LEAGUE_F1_SIDE = 0.293;
+// How far a maximally bad control profile moves a starter off the base rate.
+// Deliberately small: the true spread in P(allows a run in the 1st) across
+// starters is narrow, and the previous version's wide swings were noise.
+const YRFI_PROXY_SPREAD = 0.10;
+// Starts of first-inning data required before the measured rate is used at all.
+// At a 20-day window most starters had exactly 3-4, so this gate was deciding
+// the answer. At 45 days a healthy starter clears it comfortably.
+const MIN_SP_STARTS = 5;
 
 const MLB_BASE   = 'https://statsapi.mlb.com/api/v1';
 const WX_BASE    = 'https://api.open-meteo.com/v1/forecast';
@@ -1079,13 +1074,12 @@ const S = {
   asOf: null,
   games:[], view:'overview', filter:'all',
   sort:{ col:'comp', dir:'desc' },
-  loading:false, aiDone:new Set(), oddsOk:false, activePreset:'30',
+  loading:false, oddsOk:false, activePreset:'30',
   mode:'bet',         // 'bet' | 'dfs'
   gameFilter:new Set(), // game_ids that are VISIBLE
   dkSalaries:{},      // name -> {salary, pos, team}
   dkStatusMsg:'',     // persists across renderDFS() re-renders
   dkStatusOk:false,
-  _aiCorsBlocked:false,
   playerProps:{},  // game_id → { kProps:[], tbProps:[], hrProps:[] }
   dkSlateTeams:null, // Set of team abbrevs from uploaded CSV — null means no filter
   optWeights:{ slg:1, wx:1, k:1, gpp:0.5 }, // gpp: 0=cash, 1=tournament
@@ -1210,25 +1204,22 @@ function setMode(mode) {
   document.getElementById('modeBet').classList.toggle('on', mode === 'bet');
   document.getElementById('modeDfs').classList.toggle('on', mode === 'dfs');
   document.getElementById('vtDfs').style.display = mode === 'dfs' ? '' : 'none';
-  const propBarEl2 = document.getElementById('propBar');
-  if (propBarEl2) propBarEl2.style.display = mode==='bet' && S.games.length ? 'flex' : 'none';
   document.getElementById('dfsUploadTabBtn').style.display = mode === 'dfs' ? '' : 'none';
-  document.getElementById('filterRow').style.display = mode === 'bet' ? '' : 'none';
-  document.getElementById('sbKWrap').style.display  = mode === 'bet' ? '' : 'none';
-  document.getElementById('sbHRWrap').style.display = mode === 'bet' ? '' : 'none';
-  document.getElementById('sbTBWrap').style.display = mode === 'bet' ? '' : 'none';
-  document.getElementById('sbValWrap').style.display= mode === 'bet' ? '' : 'none';
-  document.getElementById('sbPFWrap').style.display = mode === 'bet' ? '' : 'none';
-  document.getElementById('sbOvWrap').style.display = mode === 'bet' ? '' : 'none';
-  document.getElementById('sbStkWrap').style.display= mode === 'dfs' ? '' : 'none';
+  // K, TB and FADE SP are useful in both modes. HR and stacks are DFS-only —
+  // HR is not in PROP_MARKETS and is not a bet type on this side.
+  document.getElementById('sbHRWrap').style.display  = mode === 'dfs' ? '' : 'none';
+  document.getElementById('sbStkWrap').style.display = mode === 'dfs' ? '' : 'none';
   if (mode === 'dfs' && S.view !== 'dfs') {
     S.view = 'dfs';
     document.querySelectorAll('.vt').forEach(x => x.classList.toggle('on', x.dataset.v === 'dfs'));
   }
   if (mode === 'bet' && S.view === 'dfs') {
-    S.view = 'cards';
+    // Was setting S.view to 'cards' while highlighting the Overview tab, so the
+    // active tab and the visible view disagreed after every DFS -> betting flip.
+    S.view = 'overview';
     document.querySelectorAll('.vt').forEach(x => x.classList.toggle('on', x.dataset.v === 'overview'));
   }
+  updateSlateSummary();
   renderView();
 }
 
@@ -1261,7 +1252,7 @@ async function load(date, asOf = null) {
   // week of future starts through), and the YRFI window ended yesterday rather than
   // the day before the target. The as-of assertion caught it; this is the cause.
   S.date = date;
-  S.loading = true; S.aiDone.clear(); S.oddsOk = false;
+  S.loading = true; S.oddsOk = false;
   S.propsErr = null; S.propsRemaining = null;
   setStatus('spin', 'Loading ' + fmtDate(date) + '…');
   showEl('emptyState', false); showEl('slateView', false);
@@ -1300,8 +1291,8 @@ async function load(date, asOf = null) {
       // three per game for K, TB and HR — and load() runs for every visitor,
       // including friends with the site link and accidental phone opens. That
       // drained a 500-credit month in three days with nobody deciding to spend
-      // anything. Now it takes a button press, same as ✦ Slate Breakdown does
-      // for AI credits.
+      // anything. Now it takes a button press. PROP_MARKETS is currently
+      // strikeouts only, so a 16-game slate costs 16 rather than 48.
     }
     setStatus('spin', 'Computing 1st inning run likelihood…');
     await fetchYRFI(raw);
@@ -1907,30 +1898,41 @@ async function fetchInjuries(games) {
   }
 }
 
+// Fires ONLY when an IL player is also in a posted lineup or listed as a
+// probable starter. That is the one case worth interrupting for, and it is not
+// really an injury report — it is a data-integrity alarm. It means the lineup
+// is stale, the IL move is newer than the lineup, or a name matched wrong.
+//
+// It used to list every IL player on every team in the slate, which was a
+// roster feed you cannot bet on. It also made the strip's truncation bug
+// dangerous: fetchInjuries pulls transactions with limit=200 across 30 days
+// of all-MLB moves, which does not cover the period, so the "who came back
+// off the IL" set is incomplete and some listed players are already active.
+// Requiring a lineup match filters most of those false positives out, because
+// a player who was reinstated and is in today's lineup is the one case the
+// truncation would otherwise get loudly wrong.
+//
+// Same rule as buildRundown: a strip that always finds something says nothing.
+// On a clean slate this stays hidden.
 function renderInjuryStrip() {
   const strip = document.getElementById('injuryStrip');
   const chips = document.getElementById('injuryChips');
   if (!strip || !chips) return;
 
-  const injuries = S._injuries || [];
-  if (!injuries.length) { strip.style.display = 'none'; return; }
+  const conflicts = (S._injuries || []).filter(p => p.inLineup);
+  if (!conflicts.length) { strip.style.display = 'none'; return; }
 
   strip.style.display = 'block';
 
-  // Show all IL players on today's slate, highlight those in active lineups
   chips.innerHTML = [
-    `<span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--r);flex-shrink:0">🚑 IL</span>`,
-    ...injuries.map(p => {
-      const bg   = p.inLineup ? 'rgba(255,69,58,.15)' : 'var(--bg3)';
-      const border = p.inLineup ? '1px solid rgba(255,69,58,.4)' : '1px solid var(--b1)';
-      const nameCol = p.inLineup ? 'var(--r)' : 'var(--t2)';
-      const badge  = p.inLineup ? `<span style="font-size:8px;color:var(--r);font-weight:700;margin-left:3px">${p.role}</span>` : '';
-      const tip = `${p.name} (${p.team}) — ${p.desc}${p.date ? ' · ' + p.date : ''}`;
-      return `<div title="${tip}" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:var(--r1);background:${bg};border:${border};cursor:default">
+    `<span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--r);flex-shrink:0" title="These players are on the IL but appear in today's lineup or as a probable starter. Usually means the lineup data is stale — verify before betting anything involving them.">⚠ IL CONFLICT</span>`,
+    ...conflicts.map(p => {
+      const tip = `${p.name} (${p.team}) — ${p.desc}${p.date ? ' · ' + p.date : ''} — but listed ${p.role}. Lineup may be stale.`;
+      return `<div title="${tip}" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:var(--r1);background:rgba(255,69,58,.15);border:1px solid rgba(255,69,58,.4);cursor:default">
         <span style="font-size:10px;font-weight:600;color:var(--t3)">${p.team}</span>
-        <span style="font-size:11px;font-weight:700;color:${nameCol}">${p.name.split(' ').pop()}</span>
+        <span style="font-size:11px;font-weight:700;color:var(--r)">${p.name.split(' ').pop()}</span>
         <span style="font-size:9px;color:var(--t3)">${p.desc.replace(' Placement','').replace('-Day IL','d IL')}</span>
-        ${badge}
+        <span style="font-size:8px;color:var(--r);font-weight:700;margin-left:3px">${p.role}</span>
       </div>`;
     })
   ].join('');
@@ -1939,10 +1941,16 @@ function renderInjuryStrip() {
 
 // ─────────────────────────────────────────────────────────────
 // YRFI — Yes/No First Inning Run Likelihood
-// Blends: team YRFI% from recent game linescores + SP vulnerability (BB9/WHIP)
+// P(either team scores in the 1st). Both inputs are probabilities on the same
+// scale: P(team scores in 1st) and P(this starter allows a run in the 1st).
 // ─────────────────────────────────────────────────────────────
 async function fetchYRFI(games) {
-  const LOOKBACK_DAYS = 20;
+  // 45, not 20. Every team is one schedule call regardless of how wide the
+  // window is, so widening it costs zero extra requests and roughly doubles
+  // both samples: ~40 team games instead of ~18, and ~9 starts per pitcher
+  // instead of ~4. At 20 days most starters landed right on the 3-start
+  // minimum, so a single rainout decided which branch of spVuln they used.
+  const LOOKBACK_DAYS = 45;
   // Ends the day BEFORE the slate, always. On a live load this changes nothing —
   // today's games have no linescore yet — but on a backfill the old version pulled
   // the target date's own first innings into the input that predicts them.
@@ -1997,6 +2005,7 @@ async function fetchYRFI(games) {
 
       return {
         yrfiPct: total >= 3 ? yrfi / total : null,
+        yrfiN:   total,
         gamesBySPId,
       };
     } catch { return null; }
@@ -2019,64 +2028,109 @@ async function fetchYRFI(games) {
       spFIERAMap[spId].push(...starts);
     }
   }
-  // Convert to ERA: (total runs allowed in 1st / starts) * 9
-  // (1 inning per start, so ERA = runs/starts * 9)
+  // ── THE UNITS FIX ──────────────────────────────────────────────────────
+  // This used to compute (total runs in 1st / starts) * 9 and then divide by 9
+  // again inside spVuln, which is just MEAN RUNS ALLOWED IN THE FIRST. That
+  // number was then averaged against offAway, which is a PROBABILITY. They are
+  // not the same quantity and they are not on the same scale: a three-run first
+  // counts as 3.0 in a mean and as one event in a rate, so mean runs runs about
+  // 1.7-1.9x the scoring probability. A league-average starter came out near
+  // 0.50 where the true P(allows a run in the 1st) is near 0.29. That gap,
+  // carried through 1-(1-a)(1-b), is the entire observed over-prediction.
+  //
+  // Now: the fraction of starts in which he allowed at least one run. Same
+  // data, already collected — only the aggregation changes.
+  // f1ERA is still computed, but only for display in the tooltip. It never
+  // touches the model again.
+  const spF1Map = {}; // spId -> { p, n, era }
   for (const [spId, starts] of Object.entries(spFIERAMap)) {
-    if (starts.length < 3) { delete spFIERAMap[spId]; continue; } // need at least 3 starts
+    if (starts.length < MIN_SP_STARTS) continue;
+    const scored    = starts.filter(s => s.inn1Allowed > 0).length;
     const totalRuns = starts.reduce((s, g) => s + g.inn1Allowed, 0);
-    spFIERAMap[spId] = R((totalRuns / starts.length) * 9, 2);
+    spF1Map[spId] = {
+      p:   scored / starts.length,
+      n:   starts.length,
+      era: R((totalRuns / starts.length) * 9, 2),
+    };
   }
 
-  // SP vulnerability — uses first-inning ERA when available, falls back to overall stats
+  // SP vulnerability, on the SAME scale as team offense: P(allows a run in 1st).
+  // Returns the source alongside the value. The old version returned a bare
+  // number, so a value that came from three starts of first-inning data and one
+  // that came from a WHIP formula were indistinguishable downstream.
   function spVuln(sp) {
-    const spId = sp.id || sp.player_id;
-    const fiera = spId ? spFIERAMap[spId] : null;
+    const spId = sp?.id || sp?.player_id;
+    const rec  = spId ? spF1Map[spId] : null;
+    if (rec) return { v: rec.p, src: 'f1', n: rec.n };
 
-    if (fiera != null) {
-      // First-inning ERA: normalize 0 (elite) to 9+ (very bad), typical range 0–7
-      return Math.min(1, Math.max(0, fiera / 9));
+    // Proxy branch, for starters without enough first innings in the window.
+    //
+    // The old proxy returned 0.40 for a league-average starter while the data
+    // branch returned ~0.50 for the same man, and which branch he landed on
+    // depended on whether a rainout pushed him under three starts. That is
+    // ~10 points of noise assigned at random, which is a large part of why the
+    // calibration buckets came back flat.
+    //
+    // Both branches now target LEAGUE_F1_SIDE for an average pitcher, and the
+    // proxy only moves him off it by a bounded amount. Control is deliberately
+    // tighter than raw stuff: walks put men on before anyone has to hit.
+    const bb9  = parseFloat(sp?.bb9)  || 3.0;
+    const whip = parseFloat(sp?.whip) || 1.30;
+    if (!Number.isFinite(bb9) || !Number.isFinite(whip)) {
+      return { v: LEAGUE_F1_SIDE, src: 'league', n: 0 };
     }
-    // Fallback: overall stats proxy — BB/9 weighted most heavily
-    const bb9  = parseFloat(sp.bb9)  || 3.0;
-    const whip = parseFloat(sp.whip) || 1.30;
-    const bbFactor   = Math.min(1, Math.max(0, (bb9 - 2.0) / 3.0));
-    const whipFactor = Math.min(1, Math.max(0, (whip - 0.9) / 0.8));
-    return (bbFactor * 0.60 + whipFactor * 0.40);
+    const bbDev   = (bb9  - 3.00) / 3.00;  // +1 = 3 BB/9 worse than average
+    const whipDev = (whip - 1.30) / 0.80;  // +1 = 0.8 WHIP worse than average
+    const dev = bbDev * 0.60 + whipDev * 0.40;
+    const v = LEAGUE_F1_SIDE + dev * YRFI_PROXY_SPREAD;
+    return { v: Math.min(0.60, Math.max(0.12, v)), src: 'proxy', n: 0 };
   }
 
   for (const g of games) {
-    const offAway = teamDataMap[g.away_id]?.yrfiPct ?? 0.42;
-    const offHome = teamDataMap[g.home_id]?.yrfiPct ?? 0.42;
+    // Fallback moved off a hardcoded 0.42. The real per-side rate is ~0.29,
+    // so 0.42 was a third scale error stacked on the other two, and it was
+    // indistinguishable from a team that genuinely sat at 0.42.
+    const awayTeam = teamDataMap[g.away_id];
+    const homeTeam = teamDataMap[g.home_id];
+    const offAway  = awayTeam?.yrfiPct ?? LEAGUE_F1_SIDE;
+    const offHome  = homeTeam?.yrfiPct ?? LEAGUE_F1_SIDE;
 
     // Away team bats top of 1st vs home SP; home team bats bottom vs away SP
-    const vulnHome = spVuln(g.hsp);
-    const vulnAway = spVuln(g.asp);
+    const vH = spVuln(g.hsp);
+    const vA = spVuln(g.asp);
 
-    const yrfiAway = offAway * 0.60 + vulnHome * 0.40;
-    const yrfiHome = offHome * 0.60 + vulnAway * 0.40;
+    const yrfiAway = offAway * 0.60 + vH.v * 0.40;
+    const yrfiHome = offHome * 0.60 + vA.v * 0.40;
 
-    // P(at least one scores in 1st) = 1 - P(neither scores)
+    // P(at least one scores in 1st) = 1 - P(neither scores).
+    // Independence is an approximation — both halves share a park, a ball and
+    // an umpire — and it biases this slightly high. Left alone in this pass so
+    // the scale fix can be measured on its own.
     const gameYRFI = 1 - (1 - yrfiAway) * (1 - yrfiHome);
 
     const aspId = g.away_sp_id;
     const hspId = g.home_sp_id;
 
     g.yrfi = {
-      // Raw 0..1 inputs, kept so the Worker can re-score this game from features
-      // rather than the app shipping it a finished answer.
-      offAway, offHome, vulnAway, vulnHome,
+      // Raw 0..1 inputs. Both are now probabilities on the same scale, and both
+      // are persisted to pred_game so a future formula change can be replayed
+      // against rows that already exist instead of needing a fresh backfill.
+      offAway, offHome, vulnAway: vA.v, vulnHome: vH.v,
+      offAwayN: awayTeam?.yrfiN ?? 0, offHomeN: homeTeam?.yrfiN ?? 0,
+      aspSrc: vA.src, hspSrc: vH.src, aspN: vA.n, hspN: vH.n,
       pct:          Math.round(gameYRFI * 100),
       awayPct:      Math.round(yrfiAway * 100),
       homePct:      Math.round(yrfiHome * 100),
-      awayFromData: teamDataMap[g.away_id] != null,
-      homeFromData: teamDataMap[g.home_id] != null,
-      aspFIERA:     aspId && spFIERAMap[aspId] != null ? spFIERAMap[aspId] : null,
-      hspFIERA:     hspId && spFIERAMap[hspId] != null ? spFIERAMap[hspId] : null,
+      awayFromData: awayTeam?.yrfiPct != null,
+      homeFromData: homeTeam?.yrfiPct != null,
+      // Display only — never fed back into the model.
+      aspFIERA:     aspId && spF1Map[aspId] ? spF1Map[aspId].era : null,
+      hspFIERA:     hspId && spF1Map[hspId] ? spF1Map[hspId].era : null,
     };
   }
 
-  S._yrfiDataCount = Object.keys(teamDataMap).length;
-  S._yrfiFIERACount = Object.keys(spFIERAMap).length;
+  S._yrfiDataCount  = Object.keys(teamDataMap).length;
+  S._yrfiFIERACount = Object.keys(spF1Map).length;
 }
 
 // Interpolates blue→yellow→red across 0-100 to match the YRFI gradient bar
@@ -2147,7 +2201,14 @@ function renderYRFIStrip() {
     // Row 0 = bottom of container (nearest bar), rows increase upward
     const bottomPx = row * ROW_PX;
     const fromData = g.yrfi.awayFromData || g.yrfi.homeFromData;
-    const spNote = g.yrfi.aspFIERA != null || g.yrfi.hspFIERA != null ? 'First-inning ERA data' : 'SP overall stats proxy';
+    // Names the source per side rather than collapsing both to one vague label.
+    // A game where both starters have real first-inning data and one where
+    // neither does used to read identically here.
+    const SRC_LBL = { f1: 'measured', proxy: 'BB/WHIP proxy', league: 'league avg' };
+    const spNote = `SP: ${g.away} ${SRC_LBL[g.yrfi.aspSrc] || '?'}`
+                 + `${g.yrfi.aspN ? ` (${g.yrfi.aspN})` : ''}`
+                 + ` · ${g.home} ${SRC_LBL[g.yrfi.hspSrc] || '?'}`
+                 + `${g.yrfi.hspN ? ` (${g.yrfi.hspN})` : ''}`;
     return `<div class="yrfi-dot" style="left:${pct}%;bottom:${bottomPx}px;position:absolute;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;cursor:pointer;pointer-events:all;z-index:10">
       <div class="yrfi-tooltip">
         <div class="yrfi-tooltip-game">${label}</div>
@@ -2196,8 +2257,11 @@ function renderStatusChips() {
     chips.push({ cls: e ? 'err' : '', txt: `${e ? '⚠ ' : ''}Props: ${why}` });
   }
   if (S.oddsOk) chips.push({cls:'odds',txt:'Odds ✓ (lines)'}); else chips.push({cls:'err',txt:'⚠ Odds: No data'});
-  if (S.aiDone.size) chips.push({cls:'ai',txt:'AI: '+S.aiDone.size+' enriched'});
-  if (S._injuries?.length) chips.push({cls:'err',txt:'IL: '+S._injuries.length+' players'});
+  // Counts CONFLICTS, not the raw IL list. A red chip reading "IL: 34 players"
+  // fired on every slate and meant nothing; this one only appears when an IL
+  // player is actually in a lineup, which is a data problem worth seeing.
+  const ilConflicts = (S._injuries || []).filter(p => p.inLineup).length;
+  if (ilConflicts) chips.push({cls:'err',txt:'IL conflict: '+ilConflicts});
   const winLabel = S.activePreset==='season'?'This Season':S.activePreset==='lastseason'?'Last Season':S.activePreset==='custom'?(S.statsStart+'→'+S.statsEnd):('Last '+S.days+'d');
   chips.push({cls:'',txt:'Window: '+winLabel});
   chips.push({cls:S.oddsWt>0?'odds':'',txt:'Edges Odds Wt: '+S.oddsWt+'%'});
@@ -2475,158 +2539,6 @@ function computeOddsBoosts(games) {
 // ─────────────────────────────────────────────────────────────
 // AI ENRICHMENT — PASS 1: Pitchers + Teams (with full L/R splits)
 // ─────────────────────────────────────────────────────────────
-async function aiEnrichPitchersTeams(games) {
-  const pl = [], tl = [];
-  for (const g of games) {
-    for (const sp of [g.asp, g.hsp]) {
-      if (!pl.find(x=>x.n===sp.name))
-        pl.push({n:sp.name,h:sp.hand,era:sp.era,k9:sp.k9,bb9:sp.bb9,hr9:sp.hr9,whip:sp.whip,k:sp.k_pct,bb:sp.bb_pct});
-    }
-    if (!tl.find(x=>x.t===g.away)) tl.push({t:g.away,nm:g.away_name,ops:g.at.ops,avg:g.at.avg,slg:g.at.slg,k:g.at.k_pct});
-    if (!tl.find(x=>x.t===g.home)) tl.push({t:g.home,nm:g.home_name,ops:g.ht.ops,avg:g.ht.avg,slg:g.ht.slg,k:g.ht.k_pct});
-  }
-  const curYr  = new Date().getFullYear();
-  const statYr = activeStatsSeason(S.date || new Date().toISOString().split('T')[0]);
-  const winCtx = S.activePreset==='season'?`full ${statYr} MLB season`:S.activePreset==='lastseason'?`${parseInt(statYr)-1} MLB season`:`last ${S.days} days of ${statYr} season`;
-  const prompt = `Baseball analytics engine. Return ONLY valid JSON, no markdown, no extra text.
-Context: ${winCtx}.
-
-Pitchers to enrich. For each pitcher, provide overall advanced stats AND splits vs LHH and RHH:
-${JSON.stringify(pl)}
-
-Teams to enrich. For each team, provide overall offensive metrics AND splits vs LHP and RHP:
-${JSON.stringify(tl)}
-
-Required JSON structure — fill ALL fields with realistic 2025 estimates:
-{
-  "pitchers": {
-    "<pitcher_name>": {
-      "fip": <float>, "xfip": <float>, "k9": <float>, "bb9": <float>, "hr9": <float>,
-      "gb_pct": <float>, "fb_pct": <float>, "hh_pct": <float>, "chase": <float>,
-      "cont": <float>, "woba_vs": <float>, "stuff_plus": <int>,
-      "vsL": { "era": <float>, "fip": <float>, "k9": <float>, "bb9": <float>, "hr9": <float>, "whip": <float>, "k_pct": <float>, "bb_pct": <float>, "woba": <float>, "iso": <float>, "ops": <float>, "slg": <float>, "avg": <float> },
-      "vsR": { "era": <float>, "fip": <float>, "k9": <float>, "bb9": <float>, "hr9": <float>, "whip": <float>, "k_pct": <float>, "bb_pct": <float>, "woba": <float>, "iso": <float>, "ops": <float>, "slg": <float>, "avg": <float> }
-    }
-  },
-  "teams": {
-    "<team_abbr>": {
-      "woba": <float>, "wrc_plus": <int>, "iso": <float>, "hh_pct": <float>,
-      "ev": <float>, "barrel": <float>, "cont": <float>,
-      "vsLHP": { "avg": <float>, "slg": <float>, "ops": <float>, "k_pct": <float>, "bb_pct": <float>, "iso": <float>, "woba": <float>, "wrc_plus": <int> },
-      "vsRHP": { "avg": <float>, "slg": <float>, "ops": <float>, "k_pct": <float>, "bb_pct": <float>, "iso": <float>, "woba": <float>, "wrc_plus": <int> }
-    }
-  }
-}`;
-
-  try {
-    const res = await fetch(CF_WORKER_URL, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        prompt, maxTokens:4000,
-        system:'You are a baseball analytics engine. Return ONLY valid JSON, no markdown, no explanation.',
-      })
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error('Worker ' + res.status + ': ' + (data.error||'unknown'));
-    const txt  = data.text || (data.content||[]).map(c=>c.text||'').join('');
-    const parsed = JSON.parse(txt.replace(/```json|```/g,'').trim());
-    for (const g of games) {
-      for (const sp of [g.asp, g.hsp]) {
-        const e = parsed.pitchers?.[sp.name];
-        if (e) { Object.assign(sp, e); sp._ai=true; S.aiDone.add(sp.name); }
-        else fbP(sp);
-        // Ensure vsL/vsR always exist
-        if (!sp.vsL || !Object.keys(sp.vsL).length) fbPSplit(sp,'vsL');
-        if (!sp.vsR || !Object.keys(sp.vsR).length) fbPSplit(sp,'vsR');
-      }
-      for (const [ts, tk] of [[g.at,'away'],[g.ht,'home']]) {
-        const team = tk==='away'?g.away:g.home;
-        const e = parsed.teams?.[team];
-        if (e) { Object.assign(ts, e); ts._ai=true; }
-        else fbT(ts);
-        if (!ts.vsLHP || !Object.keys(ts.vsLHP).length) fbTSplit(ts,'vsLHP');
-        if (!ts.vsRHP || !Object.keys(ts.vsRHP).length) fbTSplit(ts,'vsRHP');
-      }
-    }
-  } catch(err) {
-    console.warn('AI pass 1 fallback:', err.message);
-    // Show local server hint if this is a CORS/file:// issue
-    if (err.message.includes('fetch') || err.message.includes('CORS') || err.message.includes('Failed')) {
-      S._aiCorsBlocked = true;
-    }
-    for (const g of games) {
-      fbP(g.asp); fbP(g.hsp); fbT(g.at); fbT(g.ht);
-      fbPSplit(g.asp,'vsL'); fbPSplit(g.asp,'vsR');
-      fbPSplit(g.hsp,'vsL'); fbPSplit(g.hsp,'vsR');
-      fbTSplit(g.at,'vsLHP'); fbTSplit(g.at,'vsRHP');
-      fbTSplit(g.ht,'vsLHP'); fbTSplit(g.ht,'vsRHP');
-    }
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
-// AI ENRICHMENT — PASS 2: All Batters (full coverage)
-// ─────────────────────────────────────────────────────────────
-async function aiEnrichBatters(games) {
-  const allBatters = [];
-  const seen = new Set();
-  for (const g of games) {
-    for (const b of [...g.away_lu, ...g.home_lu]) {
-      if (b.name && !seen.has(b.name)) { allBatters.push({n:b.name,h:b.hand,ops:b.ops,k:b.k_pct,avg:b.avg,slg:b.slg}); seen.add(b.name); }
-    }
-  }
-  if (!allBatters.length) return;
-  // Split into chunks of 50 to stay within token limits
-  const chunks = [];
-  for (let i=0; i<allBatters.length; i+=50) chunks.push(allBatters.slice(i,i+50));
-  const allParsed = {};
-  const curYr  = new Date().getFullYear();
-  const statYr = activeStatsSeason(S.date || new Date().toISOString().split('T')[0]);
-  const winCtx = S.activePreset==='season'?`full ${statYr} MLB season`:S.activePreset==='lastseason'?`${parseInt(statYr)-1} MLB season`:`last ${S.days} days of ${statYr} season`;
-  await Promise.allSettled(chunks.map(async chunk => {
-    const prompt = `Baseball analytics. Return ONLY valid JSON, no markdown.
-Context: ${winCtx}.
-For each batter, provide realistic 2025 splits vs LHP and vs RHP.
-Batters: ${JSON.stringify(chunk)}
-JSON structure:
-{
-  "<batter_name>": {
-    "vsL": { "avg": <float>, "slg": <float>, "ops": <float>, "k_pct": <float>, "bb_pct": <float>, "iso": <float>, "woba": <float>, "hh_pct": <float>, "tb_rate": <float> },
-    "vsR": { "avg": <float>, "slg": <float>, "ops": <float>, "k_pct": <float>, "bb_pct": <float>, "iso": <float>, "woba": <float>, "hh_pct": <float>, "tb_rate": <float> }
-  }
-}`;
-    try {
-      const res = await fetch(CF_WORKER_URL, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          prompt, maxTokens:4000,
-          system:'You are a baseball analytics engine. Return ONLY valid JSON, no markdown, no explanation.',
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error('Worker ' + res.status + ': ' + (data.error||'unknown'));
-      const txt = data.text || (data.content||[]).map(c=>c.text||'').join('');
-      const parsed = JSON.parse(txt.replace(/```json|```/g,'').trim());
-      Object.assign(allParsed, parsed);
-    } catch(err) { console.warn('AI pass 2 chunk error:', err.message); }
-  }));
-  for (const g of games) {
-    for (const b of [...g.away_lu, ...g.home_lu]) {
-      const e = allParsed[b.name];
-      if (e) { b.vsL=e.vsL||{}; b.vsR=e.vsR||{}; b._splitAI=true; S.aiDone.add(b.name); }
-      else fbBatterSplits(b);
-      // Compute total bases potential
-      b.tb_vsHand = (ph) => {
-        const sk = ph==='L' ? b.vsL : b.vsR;
-        return sk?.tb_rate || sk?.slg || b.slg || 0.420;
-      };
-    }
-  }
-  // Apply DK salaries if loaded
-  if (Object.keys(S.dkSalaries).length) applyDKSalaries(S.games);
-}
-
-// ─── FALLBACKS ───
 function fbBatterSplits(b) {
   const ops=b.ops||0.720, kpct=b.k_pct||22, iso=b.iso||0.150, avg=b.avg||0.250, slg=b.slg||0.400;
   if (b.hand==='L') {
@@ -2676,11 +2588,11 @@ function fbT(t) {
   if (!t.cont)     t.cont    = R(77.5-(t.k_pct||22)*.28,1);
 }
 
-// Runs the synthetic (non-AI) fallback split generators immediately after load,
-// so vsL/vsR/vsLHP/vsRHP are never left as empty {} objects pre-AI-enrichment.
-// AI enrichment (manual, via Slate Breakdown) overwrites these with better
-// estimates when triggered — this just guarantees there's always SOMETHING
-// there instead of blank "—" cells in the detail/split views.
+// Runs the synthetic fallback split generators immediately after load, so
+// vsL/vsR/vsLHP/vsRHP are never left as empty {} objects. This is now the ONLY
+// source for these — the AI enrichment that used to overwrite them is gone.
+// These are formula-derived, not measured, and every surface that shows them
+// tags them 'synthetic' for that reason.
 function applyFallbackSplits(games) {
   for (const g of games) {
     for (const sp of [g.asp, g.hsp]) {
@@ -3020,81 +2932,112 @@ function renderGameFilterChips() {
 function renderSlate() {
   showEl('emptyState',false); showEl('gameDetail',false);
   showEl('slateView',true); showEl('slateBar',true);
-  // Show prop bar only in betting mode
-  const propBarEl = document.getElementById('propBar');
-  if (propBarEl) propBarEl.style.display = S.mode==='bet' ? 'flex' : 'none';
   updateSlateSummary();
-  updatePropBar();
   renderYRFIStrip();
   renderInjuryStrip();
   renderView();
-  showLocalServerBanner(S._aiCorsBlocked);
   // Show DFS tab only in DFS mode
   document.getElementById('vtDfs').style.display = S.mode==='dfs' ? '' : 'none';
 }
+// One renderer for one bar. Each market resolves the same way: try the posted
+// prop line first, fall back to the model, and always say which you got.
+//
+// Deleted here, deliberately:
+//   VALUE   — computed `sK(hsp,at) - sK(asp,ht)`, a STRIKEOUT matchup
+//             differential, and compared it to a moneyline. Strikeout edge is
+//             not win probability. It was also the only headline number on the
+//             page never logged to D1, so it had never been checked against a
+//             single outcome. Two identical copies existed (sbVal and pbVal).
+//   P-FAV   — counted games where one starter's composite beat the other's by
+//             >2. On the 09/04 slate it returned 16 of 16. The threshold is so
+//             loose it never fails, so the number was just the game count.
+//   OVER ENV— counted games where ov > un, no threshold and no denominator.
+//             The ↑Over chip shows the same set and lets you click into it.
 function updateSlateSummary() {
   const gs = filteredGames().length ? filteredGames() : S.games;
   document.getElementById('sbG').textContent = gs.length;
 
-  // TOP K — best pitcher by K edge score, named specifically
-  let bestKPit=null,bestKScore=-Infinity;
-  for(const g of gs){for(const[sp,oppTeam,myTeam]of[[g.asp,g.ht,g.away],[g.hsp,g.at,g.home]]){if(!sp.name||sp.name==='TBD')continue;const score=sK(sp,oppTeam);if(score>bestKScore){bestKScore=score;bestKPit={name:sp.name.split(' ').pop(),team:myTeam};}}}
-  document.getElementById('sbK').textContent=bestKPit?`${bestKPit.name} (${bestKPit.team})`:'—';
+  // HR and stacks are DFS concerns; HR is not in PROP_MARKETS either.
+  const dfs = S.mode === 'dfs';
+  document.getElementById('sbHRWrap').style.display = dfs ? '' : 'none';
 
-  // TOP HR — best hitter for HR by ISO vs pitcher hand + park
-  let bestHR=null,bestHRScore=-Infinity;
-  for(const g of gs){for(const[lu,oppSP,myTeam]of[[g.away_lu,g.hsp,g.away],[g.home_lu,g.asp,g.home]]){const ph=oppSP.hand||'R';for(const b of lu){if(!b.name)continue;const bs=bSplit(b,ph);const score=(parseFloat(bs.iso||b.iso)||.150)*25+(parseFloat(bs.slg||b.slg)||.400)*8+(oppSP.hr9||1.1)*3+((g.park.hr||100)-100)*.05+(g.wx.weff==='out'?0.5:0);if(score>bestHRScore){bestHRScore=score;bestHR={name:b.name.split(' ').pop(),team:myTeam};}}}}
-  document.getElementById('sbHR').textContent=bestHR?`${bestHR.name} (${bestHR.team})`:'—';
+  // Tags the value with where it came from. The old prop bar printed a model
+  // guess and a real book line in the same slot with nothing to tell them
+  // apart beyond an easily-missed "est" suffix.
+  const srcTag = live => live
+    ? `<span style="font-size:8px;color:var(--g);letter-spacing:.5px;margin-left:5px">BOOK</span>`
+    : `<span style="font-size:8px;color:var(--t3);letter-spacing:.5px;margin-left:5px">MODEL</span>`;
+  const setRow = (id, txt, live) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = txt ? `${txt}${srcTag(live)}` : '—';
+  };
 
-  // TOP TB — best hitter for total bases
-  let bestTB=null,bestTBScore=-Infinity;
-  for(const g of gs){for(const[lu,oppSP,myTeam]of[[g.away_lu,g.hsp,g.away],[g.home_lu,g.asp,g.home]]){const ph=oppSP.hand||'R';for(const b of lu){if(!b.name)continue;const bs=bSplit(b,ph);const slg=parseFloat(bs.slg||b.slg)||.400;const score=slg*10+(parseFloat(bs.ops||b.ops)||.710)*4+(parseFloat(bs.iso||b.iso)||.150)*8;if(score>bestTBScore){bestTBScore=score;bestTB={name:b.name.split(' ').pop(),team:myTeam};}}}}
-  document.getElementById('sbTB').textContent=bestTB?`${bestTB.name} (${bestTB.team})`:'—';
+  // ⚡ TOP K — posted K line if props are loaded, else the model's best matchup.
+  const kPlay = bestPropPlay('k', gs);
+  if (kPlay) {
+    setRow('sbK', `${kPlay.name.split(' ').pop()} (${kPlay.team}) ${kPlay.line ? `${kPlay.line}+ K` : 'K over'} ${mlStr(kPlay.price)} · ${kPlay.books}bk`, true);
+  } else {
+    let best=null,bs=-Infinity;
+    for(const g of gs)for(const[sp,oppTeam,myTeam]of[[g.asp,g.ht,g.away],[g.hsp,g.at,g.home]]){
+      if(!sp.name||sp.name==='TBD')continue;
+      const sc=sK(sp,oppTeam);
+      if(sc>bs){bs=sc;best={name:sp.name.split(' ').pop(),team:myTeam,k9:F(sp.k9)};}
+    }
+    setRow('sbK', best?`${best.name} (${best.team}) · ${best.k9} K/9`:null, false);
+  }
 
-  // VALUE — mispriced team (model favors but market has as dog)
-  let bestVal=null,bestValEdge=-Infinity;
-  for(const g of gs){if(!g.odds)continue;const modelAwayEdge=sK(g.hsp,g.at)-sK(g.asp,g.ht);const awayML=g.odds.consensus_away;const homeML=g.odds.consensus_home;if(awayML!=null&&modelAwayEdge>1.5&&awayML>105){const edge=modelAwayEdge+(awayML/50);if(edge>bestValEdge){bestValEdge=edge;bestVal=`${g.away} +${awayML}`;}}if(homeML!=null&&modelAwayEdge<-1.5&&homeML>105){const edge=(-modelAwayEdge)+(homeML/50);if(edge>bestValEdge){bestValEdge=edge;bestVal=`${g.home} +${homeML}`;}}}
-  document.getElementById('sbVal').textContent=bestVal||(S.oddsOk?'No lean':'No odds');
+  // 🟣 TOP TB — ONE formula now. The slate bar used slg*10 + ops*4 + iso*8 and
+  // the prop bar used slg*10 + ops*4, so the two rows could name different
+  // hitters off the same lineups. This is the fuller of the two.
+  const tbPlay = bestPropPlay('tb', gs);
+  if (tbPlay) {
+    setRow('sbTB', `${tbPlay.name.split(' ').pop()} (${tbPlay.team}) ${tbPlay.line ? `${tbPlay.line}+ TB` : 'TB over'} ${mlStr(tbPlay.price)} · ${tbPlay.books}bk`, true);
+  } else {
+    let best=null,bs=-Infinity;
+    for(const g of gs)for(const[lu,oppSP,myTeam]of[[g.away_lu,g.hsp,g.away],[g.home_lu,g.asp,g.home]]){
+      const ph=oppSP.hand||'R';
+      for(const b of lu){
+        if(!b.name)continue;
+        const s=bSplit(b,ph);
+        const sc=(parseFloat(s.slg||b.slg)||.400)*10+(parseFloat(s.ops||b.ops)||.710)*4+(parseFloat(s.iso||b.iso)||.150)*8;
+        if(sc>bs){bs=sc;best={name:b.name.split(' ').pop(),team:myTeam};}
+      }
+    }
+    setRow('sbTB', best?`${best.name} (${best.team})`:null, false);
+  }
 
-  document.getElementById('sbPF').textContent=gs.filter(g=>g.edges.padv.team).length;
-  document.getElementById('sbOv').textContent=gs.filter(g=>g.edges.ov>g.edges.un).length;
-  if(S.mode==='dfs'){const stk=computeStacks(gs);document.getElementById('sbStk').textContent=stk[0]?.team||'—';}
+  // 💣 TOP HR — DFS only. Same consolidation: the fuller of the two formulas.
+  if (dfs) {
+    const hrPlay = bestPropPlay('hr', gs);
+    if (hrPlay) {
+      setRow('sbHR', `${hrPlay.name.split(' ').pop()} (${hrPlay.team}) HR ${mlStr(hrPlay.price)} · ${hrPlay.books}bk`, true);
+    } else {
+      let best=null,bs=-Infinity;
+      for(const g of gs)for(const[lu,oppSP,myTeam]of[[g.away_lu,g.hsp,g.away],[g.home_lu,g.asp,g.home]]){
+        const ph=oppSP.hand||'R';
+        for(const b of lu){
+          if(!b.name)continue;
+          const s=bSplit(b,ph);
+          const sc=(parseFloat(s.iso||b.iso)||.150)*25+(parseFloat(s.slg||b.slg)||.400)*8+(oppSP.hr9||1.1)*3+((g.park.hr||100)-100)*.05+(g.wx.weff==='out'?0.5:0);
+          if(sc>bs){bs=sc;best={name:b.name.split(' ').pop(),team:myTeam};}
+        }
+      }
+      setRow('sbHR', best?`${best.name} (${best.team})`:null, false);
+    }
+  }
+
+  // 🚫 FADE SP — always a model read; there is no "worst pitcher" market.
+  const fade = findFadePitcher(gs);
+  const fadeEl = document.getElementById('sbFade');
+  if (fadeEl) fadeEl.textContent = fade ? `${fade.name.split(' ').pop()} (${fade.team}) ERA ${fade.era} FIP ${fade.fip}` : '—';
+
+  if (dfs) { const stk=computeStacks(gs); document.getElementById('sbStk').textContent = stk[0]?.team || '—'; }
 }
-function updatePropBar() {
-  const propBarEl=document.getElementById('propBar');
-  if(!propBarEl)return;
-  if(S.mode!=='bet'){propBarEl.style.display='none';return;}
-  const gs=filteredGames().length?filteredGames():S.games;
-
-  // K Prop
-  const kPlay=bestPropPlay('k',gs);
-  if(kPlay){const lineStr=kPlay.line?`${kPlay.line}+ Ks`:'K over';document.getElementById('pbK').textContent=`${kPlay.name.split(' ').pop()} (${kPlay.team}) ${lineStr} ${mlStr(kPlay.price)} · ${kPlay.books}bk`;}
-  else{let bk=null,bs2=-Infinity;for(const g of gs){for(const[sp,oppTeam,myTeam]of[[g.asp,g.ht,g.away],[g.hsp,g.at,g.home]]){if(!sp.name||sp.name==='TBD')continue;const sc=sK(sp,oppTeam);if(sc>bs2){bs2=sc;bk={name:sp.name.split(' ').pop(),team:myTeam,k9:F(sp.k9)};}}}document.getElementById('pbK').textContent=bk?`${bk.name} (${bk.team}) · ${bk.k9} K/9 est`:'—';}
-
-  // HR Prop
-  const hrPlay=bestPropPlay('hr',gs);
-  if(hrPlay){document.getElementById('pbHR').textContent=`${hrPlay.name.split(' ').pop()} (${hrPlay.team}) HR ${mlStr(hrPlay.price)} · ${hrPlay.books}bk`;}
-  else{let bhr=null,bhrs=-Infinity;for(const g of gs){for(const[lu,oppSP,myTeam]of[[g.away_lu,g.hsp,g.away],[g.home_lu,g.asp,g.home]]){const ph=oppSP.hand||'R';for(const b of lu){if(!b.name)continue;const bsp=bSplit(b,ph);const sc=(parseFloat(bsp.iso||b.iso)||.150)*25+(oppSP.hr9||1.1)*3+((g.park.hr||100)-100)*.05;if(sc>bhrs){bhrs=sc;bhr={name:b.name.split(' ').pop(),team:myTeam};}}}}document.getElementById('pbHR').textContent=bhr?`${bhr.name} (${bhr.team}) · model lean`:'—';}
-
-  // TB Prop
-  const tbPlay=bestPropPlay('tb',gs);
-  if(tbPlay){const lineStr=tbPlay.line?`${tbPlay.line}+ TB`:'TB over';document.getElementById('pbTB').textContent=`${tbPlay.name.split(' ').pop()} (${tbPlay.team}) ${lineStr} ${mlStr(tbPlay.price)} · ${tbPlay.books}bk`;}
-  else{let btb=null,btbs=-Infinity;for(const g of gs){for(const[lu,oppSP,myTeam]of[[g.away_lu,g.hsp,g.away],[g.home_lu,g.asp,g.home]]){const ph=oppSP.hand||'R';for(const b of lu){if(!b.name)continue;const bsp=bSplit(b,ph);const slg=parseFloat(bsp.slg||b.slg)||.400;const sc=slg*10+(parseFloat(bsp.ops||b.ops)||.710)*4;if(sc>btbs){btbs=sc;btb={name:b.name.split(' ').pop(),team:myTeam};}}}}document.getElementById('pbTB').textContent=btb?`${btb.name} (${btb.team}) · model lean`:'—';}
-
-  // Fade SP
-  const fade=findFadePitcher(gs);
-  document.getElementById('pbFade').textContent=fade?`${fade.name.split(' ').pop()} (${fade.team}) ERA ${fade.era} FIP ${fade.fip}`:'—';
-
-  // Value
-  let bval=null,bvale=-Infinity;
-  for(const g of gs){if(!g.odds)continue;const me=sK(g.hsp,g.at)-sK(g.asp,g.ht);const aml=g.odds.consensus_away;const hml=g.odds.consensus_home;if(aml!=null&&me>1.5&&aml>105){const e=me+(aml/50);if(e>bvale){bvale=e;bval=`${g.away} +${aml}`;}}if(hml!=null&&me<-1.5&&hml>105){const e=(-me)+(hml/50);if(e>bvale){bvale=e;bval=`${g.home} +${hml}`;}}}
-  document.getElementById('pbVal').textContent=bval||(S.oddsOk?'No lean':'No odds');
-  propBarEl.style.display='flex';
-}
-
 function renderView() {
   showEl('overviewView', S.view==='overview');
   showEl('cardsView',   S.view==='cards');
+  // The chips live inside the cards view now, so they appear and disappear with it.
+  showEl('cardsFilterWrap', S.view==='cards');
   showEl('heatmapView', false);
   showEl('tableView',   false);
   showEl('chartsView',  S.view==='charts');
@@ -3120,14 +3063,27 @@ function renderView() {
 function renderCards() {
   let gs = filteredGames();
   const f = S.filter;
+  // Thresholds match mkBadges() exactly. They did not before: the ↑Over CHIP
+  // was a bare `ov > un`, which passes about half of any slate, while the
+  // ↑OVER BADGE on the same cards required ov >= 7.5. Same word, two meanings,
+  // one screen.
   if (f!=='all') gs=gs.filter(g=>{
     if(f==='k')     return g.edges.ke>=6.1;
     if(f==='hr')    return g.edges.hre>=7.0;
-    if(f==='over')  return g.edges.ov>g.edges.un;
-    if(f==='under') return g.edges.un>=g.edges.ov;
+    if(f==='over')  return g.edges.ov>g.edges.un && g.edges.ov>=7.5;
+    if(f==='under') return g.edges.un>=g.edges.ov && g.edges.un>=7.0;
     if(f==='value') return g.edges.oddsDetail?.valueType==='Line Value';
     return true;
   });
+  // A filter that silently returns nothing is indistinguishable from a slate
+  // that failed to load. Say which it is.
+  if (!gs.length) {
+    document.getElementById('cardsView').innerHTML =
+      `<div style="grid-column:1/-1;padding:28px;text-align:center;color:var(--t3);font-size:13px">`
+      + `No game on this slate clears the <b style="color:var(--t2)">${f.toUpperCase()}</b> threshold. `
+      + `That is a real answer, not a loading state.</div>`;
+    return;
+  }
   gs.sort((a,b)=>b.edges.composite-a.edges.composite);
   document.getElementById('cardsView').innerHTML = gs.map(mkCard).join('');
   document.querySelectorAll('.card').forEach(c=>c.addEventListener('click',()=>showDetail(c.dataset.id)));
@@ -4665,7 +4621,7 @@ function batterSplitHeatmap(lineup,pitcher){
   const pitRow=`<tr style="background:rgba(28,34,48,.95);border-bottom:2px solid var(--b2)">
 <td style="padding:5px 6px;text-align:center;color:var(--t3);font-size:10px">SP</td>
 <td style="padding:5px 8px" colspan="3">
-  <div style="font-size:10px;font-weight:700;color:var(--t2)">${pitcher.name} — Pitcher Splits ${pitcher._ai?'<span class="ailbl">AI est.</span>':''}${infoIcon(pitcherSplitSrc(pitcher), pitcher._ai ? 'AI-estimated vs-hand splits for this pitcher.' : 'Formula-derived vs-hand splits (fixed multiplier off this pitcher\'s overall rates) — not fetched from a real vs-hand data source. Run Slate Breakdown for AI estimates.')}</div>
+  <div style="font-size:10px;font-weight:700;color:var(--t2)">${pitcher.name} — Pitcher Splits ${pitcher._ai?'<span class="ailbl">AI est.</span>':''}${infoIcon(pitcherSplitSrc(pitcher), pitcher._ai ? 'Stale AI-estimated splits from the removed enrichment path — reload the slate.' : 'Formula-derived vs-hand splits (fixed multiplier off this pitcher\'s overall rates) — not fetched from a real vs-hand data source.')}</div>
   <div style="font-size:9px;color:var(--t3);margin-top:1px;display:flex;gap:12px;flex-wrap:wrap">
     <span>vs LHH: ERA ${F(pL.era??pitcher.era)} · K/9 ${F(pL.k9??pitcher.k9)} · K% ${FP(pL.k_pct??pitcher.k_pct)} · wOBA ${F3(pL.woba??pitcher.woba_vs)}</span>
     <span>vs RHH: ERA ${F(pR.era??pitcher.era)} · K/9 ${F(pR.k9??pitcher.k9)} · K% ${FP(pR.k_pct??pitcher.k_pct)} · wOBA ${F3(pR.woba??pitcher.woba_vs)}</span>
@@ -4683,9 +4639,9 @@ ${cols.map(c=>`<td style="padding:3px 4px"><div style="background:var(--bg4);bor
     `For the batter's real tendency vs. this hand, look at the K%/SLG/OPS/etc. columns to the right instead.`);
   const splitIcon = infoIcon(splitSrc,
     `${anyAI
-      ? 'These vs-hand splits were estimated by Claude (Slate Breakdown was run for this slate).'
+      ? 'These vs-hand splits came from the removed AI enrichment path and are stale — reload the slate to replace them with the formula version.'
       : 'These vs-hand splits are a formula: the batter\'s overall season line, adjusted up/down by a fixed multiplier for this handedness matchup. It is built on the same platoon assumption as the Adv tag, so it can\'t surface a genuine reverse split — it will always agree with the tag next to it.'}` +
-    ` Run <b style="color:var(--pu)">✦ Slate Breakdown</b> for AI-estimated splits, which have a better (though still not perfect) chance of catching an unusual split.`);
+    ` There is no better source wired in: real vs-hand batter splits would need a per-player MLB splits call, which runs into the same subrequest ceiling that already truncates the TB module's platoon lookups.`);
   const thead=`<tr>
 <th style="width:20px">#</th>
 <th style="text-align:left;min-width:130px">Batter</th>
@@ -4756,7 +4712,7 @@ function ht2(val,thr,inv){const v=parseFloat(val);if(isNaN(v))return'';const[t1,
 //          | null (skip the provenance row, methodology-only tooltip)
 const SRC_LABEL = {
   real:      'Real stat (MLB API)',
-  ai:        'AI estimate (Slate Breakdown)',
+  ai:        'AI estimate (legacy — no longer produced)',
   synthetic: 'Modeled (synthetic fallback)',
   computed:  'Computed from mixed sources',
 };
@@ -4770,10 +4726,12 @@ function infoIcon(srcTier, methodHtml) {
 // batch stat fetch or roster-estimate fetch found this player, else the
 // formulas throughout the app fall back to a league-average constant.
 function batterStatSrc(b) { return b?._statSrc === 'real' ? 'real' : 'synthetic'; }
-// Batter's vsL/vsR HAND SPLITS — AI if Slate Breakdown ran and returned this
-// player, else synthetic (a fixed multiplier applied to the top-level stat —
-// see fbBatterSplits — which means it can never disagree with the platoon
-// assumption baked into the multiplier itself).
+// Batter's vsL/vsR HAND SPLITS. Always 'synthetic' now: a fixed multiplier
+// applied to the top-level stat (see fbBatterSplits), which means it can never
+// disagree with the platoon assumption baked into the multiplier itself.
+// The 'ai' branch is dead — Slate Breakdown was removed — but the _splitAI
+// check is left in place so any stale object still renders honestly rather
+// than silently claiming to be real data.
 function batterSplitSrc(b) { return b?._splitAI ? 'ai' : 'synthetic'; }
 // Pitcher fields split into what's actually fetched from MLB (era/whip/k9/bb9/
 // hr9/k_pct/bb_pct, via fetchPStat) vs everything else (fip/xfip/chase/cont/
@@ -4805,7 +4763,7 @@ const FP = v => { const n=parseFloat(v); return isNaN(n)?'—':n.toFixed(1)+'%';
 
 function showEl(id,show){
   const e=document.getElementById(id); if(!e)return;
-  const grid=id==='slateBar'||id==='gameFilterBar'?'flex':id==='cardsView'?'grid':'block';
+  const grid=id==='slateBar'||id==='gameFilterBar'?'flex':id==='cardsView'?'grid':'block';  // cardsFilterWrap falls through to block, which is correct
   e.style.display=show?grid:'none';
 }
 function fmtDate(d){try{return new Date(d+'T12:00:00').toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'});}catch{return d;}}
@@ -4828,144 +4786,6 @@ function showError(title,msg){
 // ─────────────────────────────────────────────────────────────
 // LOCAL SERVER BANNER
 // ─────────────────────────────────────────────────────────────
-function showLocalServerBanner(show) {
-  const existingBanner = document.getElementById('localServerBanner');
-  if (!show) { if (existingBanner) existingBanner.remove(); return; }
-  if (existingBanner) return; // already shown
-
-  const banner = document.createElement('div');
-  banner.id = 'localServerBanner';
-  banner.style.cssText = [
-    'background:rgba(168,85,247,.12)',
-    'border:1px solid rgba(168,85,247,.4)',
-    'border-radius:var(--r2)',
-    'padding:12px 18px',
-    'margin-bottom:12px',
-    'font-size:12px',
-    'line-height:1.8',
-    'color:var(--t2)',
-    'position:relative',
-  ].join(';');
-
-  // Detect OS for correct terminal command
-  const isMac = navigator.platform.toLowerCase().includes('mac');
-  const folder = isMac ? '~/Downloads' : 'your Downloads folder';
-  const cmd1   = isMac ? 'cd ~/Downloads' : 'cd C:\Users\YourName\Downloads';
-
-  banner.innerHTML = `
-<button onclick="this.parentElement.remove()" style="position:absolute;top:8px;right:10px;background:none;border:none;color:var(--t3);cursor:pointer;font-size:16px;line-height:1">✕</button>
-<div style="font-family:var(--fm);font-size:10px;font-weight:700;letter-spacing:1px;color:var(--pu);text-transform:uppercase;margin-bottom:8px">⚡ Unlock Full AI Enrichment — Run as Local Server</div>
-<div>The app is running from a local file (<code style="color:var(--y)">file://</code>), which browsers block from making API calls to Anthropic and The Odds API. This means AI-estimated splits and live odds are unavailable. Stats and schedule data still loads fine.</div>
-<div style="margin-top:10px;font-weight:700;color:var(--t)">Fix in 30 seconds — open Terminal and run:</div>
-<div style="margin-top:6px;background:var(--bg);border-radius:var(--r1);padding:10px 14px;font-family:var(--fm);font-size:12px;color:var(--g);letter-spacing:.3px">
-  ${cmd1}<br>
-  python3 -m http.server 8080
-</div>
-<div style="margin-top:8px">Then open <a href="http://localhost:8080" target="_blank" style="color:var(--bl)">http://localhost:8080</a> in your browser and select the HTML file. All features will work — AI splits, live odds, full projections.</div>`;
-
-  // Insert at top of main content
-  const main = document.querySelector('.main');
-  if (main) main.insertBefore(banner, main.firstChild);
-}
-
-// ─────────────────────────────────────────────────────────────
-// USER GUIDE
-// ─────────────────────────────────────────────────────────────
-async function generateSlateSummary() {
-  const modal = document.getElementById('summaryModal');
-  const content = document.getElementById('summaryContent');
-  modal.style.display = 'flex';
-  // CF_WORKER_URL defined at top of script
-  const gs = filteredGames().length ? filteredGames() : S.games;
-  if (!gs.length) {
-    content.innerHTML = '<p style="color:var(--t3)">No slate loaded. Load a date first.</p>';
-    return;
-  }
-
-  // Run AI enrichment if it hasn't been done yet for this slate
-  if (!S.aiDone.size) {
-    content.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:var(--t3)"><div class="spin"></div> AI enriching pitchers & teams (pass 1/2)…</div>';
-    await aiEnrichPitchersTeams(S.games);
-    content.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:var(--t3)"><div class="spin"></div> AI enriching batters (pass 2/2)…</div>';
-    await aiEnrichBatters(S.games);
-    S.games = S.games.map(g => ({ ...g, edges: computeEdges(g) }));
-    renderView();
-  }
-
-  content.innerHTML = '<div style="display:flex;align-items:center;gap:10px;color:var(--t3)"><div class="spin"></div> Analyzing today\'s slate…</div>';
-
-  // Build a compact data snapshot to send to Claude
-  const games = gs.map(g => {
-    const ir = impliedTeamRuns(g);
-    return {
-      matchup: `${g.away} @ ${g.home}`,
-      time: g.time,
-      venue: g.venue,
-      weather: g.wx.dome ? 'Dome' : `${g.wx.temp_f}°F, wind ${g.wx.wsp}mph ${g.wx.weff}`,
-      awaySP: { name:g.asp.name, hand:g.asp.hand, era:g.asp.era, fip:g.asp.fip, k9:g.asp.k9, whip:g.asp.whip },
-      homeSP: { name:g.hsp.name, hand:g.hsp.hand, era:g.hsp.era, fip:g.hsp.fip, k9:g.hsp.k9, whip:g.hsp.whip },
-      odds: g.odds ? {
-        awayML: g.odds.consensus_away, homeML: g.odds.consensus_home,
-        ouLine: g.odds.ou_line,
-        impAway: g.odds.imp_away, impHome: g.odds.imp_home,
-      } : null,
-      impliedRuns: ir,
-      edges: { k: g.edges?.ke, hr: g.edges?.hre, over: g.edges?.ov, under: g.edges?.un, composite: g.edges?.composite },
-      park: { name: g.park?.name, runFactor: g.park?.run, hrFactor: g.park?.hr },
-    };
-  });
-
-  // Best prop targets from the summary bar
-  const propK    = document.getElementById('pbK')?.textContent;
-  const propHR   = document.getElementById('pbHR')?.textContent;
-  const propTB   = document.getElementById('pbTB')?.textContent;
-  const fadeSP   = document.getElementById('pbFade')?.textContent;
-  const valuePlay= document.getElementById('pbVal')?.textContent;
-
-  const prompt = `You are a sharp daily fantasy sports and sports betting analyst. Here is today's MLB slate data. Write a concise, plain-English breakdown in 3-4 paragraphs. Be specific — name players, mention exact stats, and give actionable takes. Don't hedge everything. Write like a sharp analyst texting a friend.
-
-SLATE DATA:
-${JSON.stringify(games, null, 2)}
-
-PROP TARGETS (from model):
-- Best K prop: ${propK}
-- Best HR prop: ${propHR}
-- Best TB prop: ${propTB}
-- Fade SP: ${fadeSP}
-- Value play: ${valuePlay}
-
-Write the breakdown covering: (1) the top 1-2 pitching matchups and specific K prop angles, (2) the best hitting environments and specific power/TB targets, (3) any value plays or fades, and (4) a one-sentence DFS focus for the day. Keep it under 300 words. Be direct and confident.`;
-
-  try {
-    // Call Cloudflare Worker proxy — keeps Anthropic API key off the client
-    const resp = await fetch(CF_WORKER_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, maxTokens: 600 })
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error('Worker error ' + resp.status + ': ' + (data.error || 'unknown'));
-    const text = data.text || data.content?.[0]?.text || '';
-    if (!text) throw new Error(data.error || 'No response from AI');
-
-    // Format into readable paragraphs
-    const formatted = text.split(/\n\n+/).map(p =>
-      `<p style="margin-bottom:14px">${p.trim()}</p>`
-    ).join('');
-    content.innerHTML = formatted ||
-      `<p style="color:var(--t3)">No summary generated.</p>`;
-
-  } catch(err) {
-    const isWorkerErr = err.message.includes('Worker') || err.message.includes('fetch') || err.message.includes('Failed') || err.message.includes('NetworkError');
-    const errMsg = isWorkerErr
-      ? 'Cloudflare Worker not yet deployed.'
-      : err.message;
-    const hint = isWorkerErr
-      ? '<p style="color:var(--t2);margin-top:10px;font-size:12px">To enable AI slate breakdown, deploy the Cloudflare Worker. It takes about 10 minutes and is free. See the README in your GitHub repo for instructions.</p>'
-      : '';
-    content.innerHTML = '<p style="color:var(--r);margin-bottom:12px">⚠ ' + errMsg + '</p>' + hint;
-  }
-}
 
 function showGuide() {
   const sections = [
@@ -4980,7 +4800,8 @@ function showGuide() {
   <li><b style="color:var(--t)">Total Bases</b> — ranked bars, one per lineup. Click to open TB Targets.</li>
   <li><b style="color:var(--t)">Data note</b> at the bottom — always states what is missing or estimated right now.</li>
 </ul>
-<p style="margin-top:8px">The <b style="color:var(--bl)">YRFI strip</b> sits above the tabs and stays visible on every view, so it is on the Overview by default.</p>`
+<p style="margin-top:8px">The <b style="color:var(--bl)">YRFI strip</b> sits above the tabs and stays visible on every view, so it is on the Overview by default.</p>
+<p style="margin-top:8px">The <b style="color:var(--r)">⚠ IL CONFLICT</b> strip appears only when a player on the injured list also shows up in a posted lineup or as a probable starter. It is not an injury report — it means the lineup data is stale or a name matched wrong, so verify before betting anything involving that game. On a clean slate it stays hidden.</p>`
     },
     {
       icon: '🚀',
@@ -4988,7 +4809,8 @@ function showGuide() {
       color: 'var(--y)',
       body: `<p>Use the <b style="color:var(--t)">date picker</b> or the <b style="color:var(--t)">← →</b> arrows. <b style="color:var(--t)">TODAY</b> jumps back to the current date. The app fetches schedule, probable pitchers, stats, weather, splits, and live odds — usually 15–30 seconds.</p>
 <p style="margin-top:8px">The <b style="color:var(--y)">Stats Window</b> bar controls how much history feeds the calculations. <b>Last Month</b> is the default; <b>This Season</b> for bigger samples; <b>Last 2 Weeks</b> for hot streaks.</p>
-<p style="margin-top:8px"><b style="color:var(--pu)">AI Slate Breakdown</b> is manual-trigger only — click <b>✦ Slate Breakdown</b> when you want player enrichment notes. Nothing else in the app spends API credits.</p>`
+<p style="margin-top:8px"><b style="color:var(--g)">⚡ Load Props</b> is manual and is the only button in the app that spends odds credits — one credit per market per game, so a 16-game slate costs 16. Game lines load automatically on a different key. Nothing else spends anything.</p>
+<p style="margin-top:8px">The old <b>✦ Slate Breakdown</b> button is gone. It did not just write a summary: it asked a language model to invent pitcher, team and batter stats, wrote them over the real MLB API values, and re-scored the whole slate off them. Use <b style="color:var(--g)">≡ Rundown</b> instead — same job, deterministic, no credits, no invented numbers.</p>`
     },
     {
       icon: '⚠',
@@ -5026,9 +4848,11 @@ function showGuide() {
       title: 'YRFI Strip',
       color: 'var(--bl)',
       body: `<p>First-inning run likelihood for every game. Each dot is a game on a <b style="color:#0a84ff">blue → </b><b style="color:#ffd60a">yellow → </b><b style="color:#ff453a">red</b> gradient. Both tails are actionable; the middle is correctly ignorable.</p>
-<p style="margin:8px 0 6px;font-family:var(--fm);font-size:12px;color:var(--t2)">team 1st-inn scoring rate × 0.60 + opposing SP vulnerability × 0.40<br>
+<p style="margin:8px 0 6px;font-family:var(--fm);font-size:12px;color:var(--t2)">P(team scores in 1st) × 0.60 + P(opposing SP allows a run in 1st) × 0.40<br>
 game YRFI = 1 − (1 − away) × (1 − home)</p>
-<p>SP vulnerability uses <b>first-inning ERA</b> when at least 3 starts of linescore data exist, otherwise falls back to a BB/9 (60%) and WHIP (40%) proxy. Hover any dot for the breakdown and which of the two it used.</p>`
+<p>Both inputs are <b>probabilities on the same scale</b>, measured over a 45-day window. The pitcher term is the fraction of his starts in which he allowed a run in the first, needing at least 5 starts of data; below that it falls back to a BB/9 and WHIP proxy centred on the same league rate. Hover any dot to see which source each side used and how many starts are behind it.</p>
+<p style="margin-top:8px"><b style="color:var(--y)">Read this one with suspicion.</b> Until <b>FEATURE_REV 2</b> the pitcher term was mean <i>runs</i> allowed in the first, not a probability — roughly 1.8× too large — and it was being averaged against a probability. Every game came out high and the calibration buckets were flat, meaning the numbers moved but told you nothing. That is fixed, but the fix is unproven until enough settled games accumulate. Check the <b>Model Report</b> before betting this module: if the Brier score is not below the base-rate baseline, the strip is still decoration.</p>
+<p style="margin-top:8px">Expect a <b>narrow</b> spread. The real range of first-inning scoring probability across matchups is roughly 42–58%. A YRFI model showing you 30% and 75% games is not finding edges, it is miscalibrated.</p>`
     },
     {
       icon: '⚡',
@@ -7744,6 +7568,48 @@ function renderModelReport() {
       mrTile('Base-rate Brier', mrNum(y?.brierBaseline, 4), `always guess ${mrPct(y?.baseRate)}`),
     ]) + `<div style="margin-top:12px">${mrTable(['Predicted bucket', 'n', 'Predicted', 'Observed', 'Gap'], yRows)}</div>` + yVerdict));
 
+  // ── 6b. first inning: the raw inputs ──
+  // A Brier score says the module is wrong. This says WHICH half is wrong.
+  // Both inputs are supposed to be probabilities on the same scale as the
+  // observed per-side rate sitting next to them. If mean vuln sits well above
+  // observed, the pitcher term is still measuring runs instead of a rate —
+  // which is exactly the bug FEATURE_REV 2 was written to kill.
+  const yi = d.yrfiInputs;
+  if (yi) {
+    const lg = d.leagueF1Side;
+    const obsSide = (yi.obs_side_away + yi.obs_side_home) / 2;
+    const meanOff  = (yi.mean_off_away  + yi.mean_off_home)  / 2;
+    const meanVuln = (yi.mean_vuln_away + yi.mean_vuln_home) / 2;
+    const offGap   = (meanOff  - obsSide) * 100;
+    const vulnGap  = (meanVuln - obsSide) * 100;
+    const spTotal  = (yi.sp_from_f1 || 0) + (yi.sp_from_proxy || 0) + (yi.sp_from_league || 0);
+    const pctOf = v => spTotal ? `${Math.round((v / spTotal) * 100)}%` : '—';
+    // 5 points is roughly the noise floor at a few hundred games; beyond that
+    // the term is mis-scaled rather than just imprecise.
+    const scaleBad = Math.abs(vulnGap) > 5 || Math.abs(offGap) > 5;
+    out.push(mrSection('First inning — input scale check',
+      `Both model inputs are probabilities and should sit near the observed per-side rate. The league constant is ${mrPct(lg)}. ${mrN(yi.n)}`,
+      mrGrid([
+        mrTile('Observed per side', mrPct(obsSide), 'a team scored in the 1st'),
+        mrTile('Mean team offense', mrPct(meanOff), `${mrSigned(offGap, 1)} pts vs observed`,
+          Math.abs(offGap) > 5 ? 'var(--r)' : 'var(--g)'),
+        mrTile('Mean SP vulnerability', mrPct(meanVuln), `${mrSigned(vulnGap, 1)} pts vs observed`,
+          Math.abs(vulnGap) > 5 ? 'var(--r)' : 'var(--g)'),
+        mrTile('Mean predicted game', mrPct(yi.mean_pred), `observed ${mrPct(yi.observed)}`),
+      ])
+      + `<div style="font-family:var(--fm);font-size:9.5px;letter-spacing:.8px;color:var(--t3);text-transform:uppercase;margin:16px 0 7px">Where the pitcher term came from · ${spTotal} sides</div>`
+      + mrTable(['Source', 'Sides', 'Share', 'What it means'], [
+          ['measured',      mrN(yi.sp_from_f1),     pctOf(yi.sp_from_f1),     `${MIN_SP_STARTS}+ starts of real first-inning data`],
+          ['BB/WHIP proxy', mrN(yi.sp_from_proxy),  pctOf(yi.sp_from_proxy),  'not enough starts — inferred from control stats'],
+          ['league avg',    mrN(yi.sp_from_league), pctOf(yi.sp_from_league), 'no usable stats at all'],
+        ])
+      + `<div style="margin-top:12px;padding:10px 12px;border-radius:var(--r1);background:${scaleBad ? 'var(--rd)' : 'var(--gd)'};border:1px solid ${scaleBad ? 'var(--r)' : 'var(--g)'};font-size:11.5px;color:var(--t2);line-height:1.6">
+          ${scaleBad
+            ? `One or both inputs sit more than 5 points off the observed per-side rate. That is a <b style="color:var(--r)">scale</b> problem, not a tuning problem — the term is measuring the wrong quantity, and no weight change fixes it.`
+            : `Both inputs sit within 5 points of the observed per-side rate, so they are on the correct scale. Whatever error remains is discrimination, not level — that is what log5 and shrinkage are for.`}
+        </div>`));
+  }
+
   // ── 7. market ──
   const m = d.market;
   const eRows = (d.edgeCalibration || []).map(b => [
@@ -8150,6 +8016,10 @@ const FL = {
         awaySpId: g.away_sp_id || null, homeSpId: g.home_sp_id || null,
         offAway: y.offAway, offHome: y.offHome, vulnAway: y.vulnAway, vulnHome: y.vulnHome,
         awayFromData: y.awayFromData, homeFromData: y.homeFromData,
+        // Provenance. Without these a wrong YRFI number cannot be attributed to
+        // the formula versus a starter who had no first-inning data behind him.
+        aspSrc: y.aspSrc, hspSrc: y.hspSrc, aspN: y.aspN, hspN: y.hspN,
+        offAwayN: y.offAwayN, offHomeN: y.offHomeN,
         parkRun: g.park?.run ?? null,
         tempF: g.wx?.tempF ?? null, weff: g.wx?.windEff ?? null, dome: !!g.wx?.dome,
         mktLine: null, mktOverPx: null, mktUnderPx: null, mktDevigProb: null,
