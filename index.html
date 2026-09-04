@@ -907,10 +907,24 @@ const YRFI_PROXY_SPREAD = 0.10;
 // weighting them down instead of excluding them, so there is no threshold whose
 // value changes the character of the answer.
 //   offGames 25 — a team has ~40 games in a 45-day window, so w ~ 0.62
-//   spStarts 10 — a starter has ~7-9, so w ~ 0.42; the rest comes from his
-//                 control-stats prior, which is the right split for an estimate
-//                 built on that few first innings
-const YRFI_STAB = { offGames: 25, spStarts: 10 };
+//   spStarts 30 — a starter averages only 5.9 first innings in the window, so
+//                 w ~ 0.16 and most of his number comes from his control-stats
+//                 prior. That is the correct split for a rate estimated on six
+//                 observations.
+//
+// spStarts was 10 and that was wrong by roughly 3x. It is now derived rather
+// than guessed: for a binomial rate the optimal half-weight is
+//   k = p(1-p) / var(true talent between pitchers)
+// At p = 0.293, a real between-starter spread of 20%-40% (SD ~0.05-0.08) gives
+// k in the 30-80 range. Independently, regressing observed on predicted across
+// the logged buckets gave a calibration slope near 0.5, implying k ~ 26. Theory
+// and backtest agree, which is the only reason this moved at all — neither on
+// its own would justify it. 30 is the conservative end of the theory range.
+//
+// offGames is UNCHANGED. There is no separate evidence the team term is
+// over-dispersed, and moving both at once would make the next report
+// uninterpretable. One change, one measurement.
+const YRFI_STAB = { offGames: 25, spStarts: 30 };
 
 // log5 on probabilities in [0,1]. The Worker's log5() takes percentages and is
 // used by the K model; this is the same odds-ratio combination on a 0..1 scale.
@@ -4924,6 +4938,8 @@ function showGuide() {
 
 <p style="margin-top:10px"><b style="color:var(--t)">How to read it.</b> Expect a <b>narrow</b> spread. Real first-inning scoring probability across matchups runs roughly 42\u201358%. A YRFI model showing 30% and 75% games is not finding edges, it is miscalibrated. Hover any dot for the per-side breakdown, which source each starter's number came from, and how many starts are behind it.</p>
 
+<p style="margin-top:10px"><b style="color:var(--t)">Two different ways to be wrong.</b> A model can rank games correctly and still lose, by being right about the order and wrong about the size. The bucket table checks the ranking; the <b>calibration slope</b> underneath it checks the sizing. 1.00 means the predicted spread matches the real one. Below 1.00 means predictions are more spread out than reality \u2014 raise the shrinkage half-weights in <code style="color:var(--t2)">YRFI_STAB</code> to compress them. That is exactly what happened here: the module started ranking games correctly and immediately began over-stating how confident it was.</p>
+
 <p style="margin-top:10px"><b style="color:var(--r)">Check the Model Report before betting this.</b> Three panels cover it: the calibration table and Brier score, the input scale check (both inputs should sit within 5 points of the observed per-side rate), and the prior-centring table (whether starters with no measured data are being rated correctly). A Brier gap under 0.004 is reported as a tie, not a win \u2014 at a few hundred games that is inside the noise.</p>`
     },
     {
@@ -7643,12 +7659,47 @@ function renderModelReport() {
         : `Brier ${mrNum(y.brier, 4)} is <b style="color:var(--r)">worse</b> than the ${mrNum(y.brierBaseline, 4)} a model that ignored every input and always guessed ${mrPct(y.baseRate)} would score. The inputs are not currently contributing.`}
     </div>`;
   }
+  // Calibration SLOPE. The bucket table shows whether the model ranks games
+  // correctly; this one number says whether it also sizes its confidence
+  // correctly. Regress observed on predicted, weighted by bucket size:
+  //   slope 1.0  = spread is right
+  //   slope < 1  = predictions more spread out than reality (over-confident)
+  //   slope ~ 0  = no discrimination at all; the buckets are noise
+  // A model can rank perfectly and still lose on Brier by over-stating, which
+  // is exactly what happened at FEATURE_REV 4. Computed here so it never has
+  // to be worked out by hand off a screenshot again.
+  let slopeBlock = '';
+  {
+    const pts = (d.yrfiCalibration || [])
+      .filter(b => b.n >= 25 && b.predicted_rate != null && b.observed_rate != null)
+      .map(b => [b.predicted_rate * 100, b.observed_rate * 100, b.n]);
+    if (pts.length >= 3) {
+      const W  = pts.reduce((a, r) => a + r[2], 0);
+      const mx = pts.reduce((a, r) => a + r[0] * r[2], 0) / W;
+      const my = pts.reduce((a, r) => a + r[1] * r[2], 0) / W;
+      const sxy = pts.reduce((a, r) => a + r[2] * (r[0] - mx) * (r[1] - my), 0);
+      const sxx = pts.reduce((a, r) => a + r[2] * (r[0] - mx) ** 2, 0);
+      const sl = sxx > 0 ? sxy / sxx : null;
+      if (sl != null) {
+        const good = sl >= 0.75 && sl <= 1.35;
+        const note = sl < 0.75
+          ? `Predictions are about ${(1 / sl).toFixed(1)}x more spread out than reality. The ranking may still be correct — over-statement costs Brier on its own. Raise the YRFI_STAB half-weights to compress.`
+          : sl > 1.35
+          ? 'Predictions are more tightly bunched than reality. The inputs are being shrunk harder than they need to be.'
+          : 'Predicted spread matches observed spread. Confidence is sized correctly.';
+        slopeBlock = `<div style="margin-top:12px;padding:10px 12px;border-radius:var(--r1);background:${good ? 'var(--gd)' : 'var(--bg3)'};border:1px solid ${good ? 'var(--g)' : 'var(--b1)'};font-size:11.5px;color:var(--t2);line-height:1.6">
+          <b style="font-family:var(--fm)">Calibration slope ${mrNum(sl, 2)}</b> — over ${pts.length} buckets with 25+ rows. 1.00 is correct. ${note}
+        </div>`;
+      }
+    }
+  }
+
   out.push(mrSection('First inning (YRFI)',
     `The only module whose output is already a probability, so it can be calibration-checked directly rather than only scored for error. Predicted and observed should track each other down the table. ${mrN(y?.n)}`,
     mrGrid([
       mrTile('Brier score', mrNum(y?.brier, 4), 'lower is better'),
       mrTile('Base-rate Brier', mrNum(y?.brierBaseline, 4), `always guess ${mrPct(y?.baseRate)}`),
-    ]) + `<div style="margin-top:12px">${mrTable(['Predicted bucket', 'n', 'Predicted', 'Observed', 'Gap'], yRows)}</div>` + yVerdict));
+    ]) + `<div style="margin-top:12px">${mrTable(['Predicted bucket', 'n', 'Predicted', 'Observed', 'Gap'], yRows)}</div>` + slopeBlock + yVerdict));
 
   // ── 6b. first inning: the raw inputs ──
   // A Brier score says the module is wrong. This says WHICH half is wrong.
