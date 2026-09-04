@@ -7917,8 +7917,12 @@ const FL = {
           for (const r of byGame[gid]) push(r, { state: 'pending', note: 'not final yet' });
           continue;
         }
+        // final=1 is only ever appended after the Final check above passed. It
+        // tells the Worker this box score is safe to cache long-term, and it is a
+        // different cache key from the bare URL, so a pre-game snapshot cached
+        // earlier in the day cannot be served here.
         let box = null;
-        try { box = await proxyFetch(`${MLB_BASE}/game/${gid}/boxscore`); } catch {}
+        try { box = await proxyFetch(`${MLB_BASE}/game/${gid}/boxscore?final=1`); } catch {}
 
         // proxyFetch returns whatever JSON it received. A Worker error body or a
         // degraded CORS proxy yields a truthy object with no teams key, which
@@ -7937,9 +7941,22 @@ const FL = {
           && Object.keys(side('away')).length >= 9
           && Object.keys(side('home')).length >= 9;
 
+        // Shape alone is not enough. A box score for a game that has not started
+        // has both full rosters and empty stat objects on every player, so it
+        // passes every structural check and then fails every lookup — which is
+        // indistinguishable from "this player was scratched" and terminally voids
+        // the row. So require that SOMEBODY in the game recorded a stat before any
+        // void is allowed. An unplayed or in-progress game is a fetch-timing
+        // problem, which is pending and recoverable, not void, which is not.
+        const anyStats = !boxOK ? false : ['away', 'home'].some(k =>
+          Object.values(side(k)).some(p =>
+            Object.keys(p?.stats?.pitching || {}).length ||
+            Object.keys(p?.stats?.batting  || {}).length));
+
         for (const r of byGame[gid]) {
-          if (!box)   { push(r, { state: 'pending', note: 'boxscore unavailable' }); continue; }
-          if (!boxOK) { push(r, { state: 'pending', note: 'boxscore malformed' });  continue; }
+          if (!box)      { push(r, { state: 'pending', note: 'boxscore unavailable' }); continue; }
+          if (!boxOK)    { push(r, { state: 'pending', note: 'boxscore malformed' });   continue; }
+          if (!anyStats) { push(r, { state: 'pending', note: 'boxscore has no stats yet' }); continue; }
 
           if (r.batter_id != null) {
             const bs = this.batterLine(box, r.batter_id);
