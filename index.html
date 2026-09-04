@@ -7673,29 +7673,28 @@ function renderModelReport() {
   // A model can rank perfectly and still lose on Brier by over-stating, which
   // is exactly what happened at FEATURE_REV 4. Computed here so it never has
   // to be worked out by hand off a screenshot again.
+  // Calibration slope, now read straight from the Worker's row-level
+  // regression rather than fitted here off bucket means. The bucket version
+  // stopped working the moment shrinkage compressed predictions into two
+  // buckets — which is precisely when you most want to know the answer.
   let slopeBlock = '';
   {
-    const pts = (d.yrfiCalibration || [])
-      .filter(b => b.n >= 25 && b.predicted_rate != null && b.observed_rate != null)
-      .map(b => [b.predicted_rate * 100, b.observed_rate * 100, b.n]);
-    if (pts.length >= 3) {
-      const W  = pts.reduce((a, r) => a + r[2], 0);
-      const mx = pts.reduce((a, r) => a + r[0] * r[2], 0) / W;
-      const my = pts.reduce((a, r) => a + r[1] * r[2], 0) / W;
-      const sxy = pts.reduce((a, r) => a + r[2] * (r[0] - mx) * (r[1] - my), 0);
-      const sxx = pts.reduce((a, r) => a + r[2] * (r[0] - mx) ** 2, 0);
-      const sl = sxx > 0 ? sxy / sxx : null;
-      if (sl != null) {
-        const good = sl >= 0.75 && sl <= 1.35;
-        const note = sl < 0.75
-          ? `Predictions are about ${(1 / sl).toFixed(1)}x more spread out than reality. The ranking may still be correct — over-statement costs Brier on its own. Raise the YRFI_STAB half-weights to compress.`
-          : sl > 1.35
-          ? 'Predictions are more tightly bunched than reality. The inputs are being shrunk harder than they need to be.'
-          : 'Predicted spread matches observed spread. Confidence is sized correctly.';
-        slopeBlock = `<div style="margin-top:12px;padding:10px 12px;border-radius:var(--r1);background:${good ? 'var(--gd)' : 'var(--bg3)'};border:1px solid ${good ? 'var(--g)' : 'var(--b1)'};font-size:11.5px;color:var(--t2);line-height:1.6">
-          <b style="font-family:var(--fm)">Calibration slope ${mrNum(sl, 2)}</b> — over ${pts.length} buckets with 25+ rows. 1.00 is correct. ${note}
-        </div>`;
-      }
+    const sl = d.yrfiSlope;
+    if (sl) {
+      const lo = sl.slope - 1.96 * sl.se, hi = sl.slope + 1.96 * sl.se;
+      const coversOne = lo <= 1 && hi >= 1;   // cannot rule out correct sizing
+      const clearlyLow = hi < 1;
+      const note = coversOne
+        ? `The interval includes 1.00, so this sample cannot tell a correctly-sized model from an over-confident one. Not a reason to change anything.`
+        : clearlyLow
+        ? `Predictions are about ${(1 / sl.slope).toFixed(1)}x more spread out than reality, and the interval excludes 1.00, so this is a real effect rather than noise. Raise the YRFI_STAB half-weights.`
+        : `Predictions are more tightly bunched than reality, and the interval excludes 1.00. The inputs are being shrunk harder than they need to be — lower the YRFI_STAB half-weights.`;
+      const good = coversOne || (!clearlyLow && sl.slope < 1.35);
+      slopeBlock = `<div style="margin-top:12px;padding:10px 12px;border-radius:var(--r1);background:${good ? 'var(--gd)' : 'var(--bg3)'};border:1px solid ${good ? 'var(--g)' : 'var(--b1)'};font-size:11.5px;color:var(--t2);line-height:1.6">
+        <b style="font-family:var(--fm)">Calibration slope ${mrNum(sl.slope, 2)} \u00b1 ${mrNum(1.96 * sl.se, 2)}</b>
+        — row-level regression over ${mrN(sl.n)} settled games, 95% interval ${mrNum(lo, 2)} to ${mrNum(hi, 2)}. 1.00 means predicted spread matches observed spread. ${note}
+        <div style="margin-top:6px;color:var(--t3)">Spread of predictions: ${mrNum(sl.sdPred * 100, 1)} pts SD. A narrow spread is not a fault — most first-inning matchups genuinely are close to the base rate.</div>
+      </div>`;
     }
   }
 
