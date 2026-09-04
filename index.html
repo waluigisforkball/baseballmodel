@@ -679,6 +679,11 @@ canvas{max-width:100%}
   <div class="ss" id="sbPFWrap" title="Number of games with a clear pitching advantage — one starter significantly outperforms the other"><span class="ss-l">P-FAV</span><span class="ss-v b" id="sbPF">—</span></div>
   <div class="ss" id="sbOvWrap" title="Games where the model favors the over — weak pitching, strong offenses, hitter-friendly park and weather all pointing the same direction"><span class="ss-l">OVER ENV</span><span class="ss-v r" id="sbOv">—</span></div>
   <div class="ss" id="sbStkWrap" style="display:none"><span class="ss-l">TOP STACK</span><span class="ss-v" style="color:var(--pu)" id="sbStk">—</span></div>
+  <button class="btn" id="propsBtn" onclick="loadPropsManually()"
+    style="margin-left:8px;font-size:12px;padding:5px 14px;flex-shrink:0"
+    title="Fetch player prop lines. Costs API credits — one per market per game — so it is deliberately not automatic.">
+    ⚡ Load Props
+  </button>
   <button class="btn" id="summaryBtn" onclick="generateSlateSummary()"
     style="margin-left:8px;font-size:12px;padding:5px 14px;background:var(--g);flex-shrink:0"
     title="AI-generated slate breakdown — powered by Claude">
@@ -877,6 +882,16 @@ canvas{max-width:100%}
 // Key 0: game lines (h2h, spreads, totals)
 // Key 1: player props (K props, TB, HR) — separate key keeps quotas independent
 const ODDS_GAME_KEY = '15313f018353764b172b5564f8c547a1';
+// Which prop markets to request. The Odds API bills one credit PER MARKET PER
+// GAME, so a 16-game slate costs 16 x this array's length. On a 500-credit month
+// that is ~10 full three-market fetches TOTAL, or ~31 fetches with strikeouts
+// alone — the difference between props twice a week and props every day.
+// Comment out what you do not use.
+const PROP_MARKETS = [
+  'pitcher_strikeouts',      // feeds the K PROP slot and pitcher market columns
+  'batter_total_bases',      // feeds the TB PROP slot and pred_batter market columns
+  'batter_home_runs',        // feeds the HR PROP slot only; has a model-only fallback
+];
 const ODDS_PROP_KEY = '6782014ed2e04a7ac6fdaa741afa172f';
 
 // Legacy rotation for game lines (fallback if primary fails)
@@ -1281,8 +1296,12 @@ async function load(date, asOf = null) {
       setStatus('spin', 'Fetching live odds…');
       await fetchOdds(raw);
       computeOddsBoosts(raw);
-      setStatus('spin', 'Fetching player props (K, TB, HR)…');
-      await fetchAllPlayerProps(raw);
+      // Props are NOT fetched on load. They cost a credit per market per game —
+      // three per game for K, TB and HR — and load() runs for every visitor,
+      // including friends with the site link and accidental phone opens. That
+      // drained a 500-credit month in three days with nobody deciding to spend
+      // anything. Now it takes a button press, same as ✦ Slate Breakdown does
+      // for AI credits.
     }
     setStatus('spin', 'Computing 1st inning run likelihood…');
     await fetchYRFI(raw);
@@ -1310,12 +1329,12 @@ async function load(date, asOf = null) {
       });
     } else {
       const e = S.propsErr;
-      const why = !e ? 'no data'
+      const why = !e ? 'not loaded — press ⚡ Load Props'
         : e.code === 'OUT_OF_USAGE_CREDITS' ? 'OUT OF CREDITS'
         : e.status === 401 ? 'key rejected'
         : e.code === 'NETWORK' ? 'network'
         : `error ${e.status}`;
-      chips.push({ cls: 'err', txt: `⚠ Props: ${why}` });
+      chips.push({ cls: S.propsErr ? 'err' : '', txt: `${S.propsErr ? '⚠ ' : ''}Props: ${why}` });
     }
     if (S.oddsOk) chips.push({cls:'odds',txt:'Odds ✓ (lines)'}); else chips.push({cls:'err',txt:'⚠ Odds: No data'});
     if (S.aiDone.size) chips.push({cls:'ai',txt:'AI: '+S.aiDone.size+' enriched'});
@@ -2159,6 +2178,29 @@ function renderYRFIStrip() {
 // PLAYER PROPS — fetched per game using the prop key
 // Markets: pitcher_strikeouts, batter_total_bases, batter_home_runs
 // ─────────────────────────────────────────────────────────────
+// Manual props fetch. Deliberately the only path that spends prop credits.
+async function loadPropsManually() {
+  const btn = document.getElementById('propsBtn');
+  if (!S.games?.length) { showError('No slate', 'Load a slate first.'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Loading props…'; }
+  try {
+    await fetchAllPlayerProps(S.games);
+    const n = Object.keys(S.playerProps || {}).length;
+    if (!n) {
+      const e = S.propsErr;
+      showError('Props unavailable', e
+        ? `${e.code === 'OUT_OF_USAGE_CREDITS' ? 'Out of API credits.' : (e.msg || 'Request failed.')}`
+        : 'No prop data returned.');
+    }
+    // Prop lines feed the market columns and the Prop Targets strip, so redraw.
+    S.games = S.games.map(g => ({ ...g, edges: computeEdges(g) }));
+    renderSlate();
+  } catch (e) {
+    showError('Props failed', e.message);
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '⚡ Load Props'; }
+}
+
 async function fetchAllPlayerProps(games) {
   if (!games.length) return;
   const cacheKey = 'props_' + (S.date || 'today');
@@ -2170,7 +2212,10 @@ async function fetchAllPlayerProps(games) {
   }
 
   S.playerProps = {};
-  const markets = 'pitcher_strikeouts,batter_total_bases,batter_home_runs';
+  // One request carries all requested markets, and cost is one credit PER MARKET,
+  // so this string is the single biggest lever on credit burn: three markets cost
+  // three times one market for the same slate. Edit PROP_MARKETS to change it.
+  const markets = PROP_MARKETS.join(',');
 
   // Fetch all games in parallel — key 1 dedicated to props
   await Promise.allSettled(games.map(async g => {
@@ -2179,21 +2224,26 @@ async function fetchAllPlayerProps(games) {
     const url = `${ODDS_BASE}/sports/baseball_mlb/events/${g.oddsEventId}/odds?apiKey=${ODDS_PROP_KEY}&regions=us&markets=${markets}&oddsFormat=american&bookmakers=fanduel,draftkings,betmgm,caesars,pointsbet`;
     let data = null;
 
-    // Try direct, then proxy.
-    // The direct attempt is the only one whose response we can actually read the
-    // error out of, so capture it here. The Odds API returns 401 for BOTH a bad
-    // key and an exhausted quota, and the difference is only in the body — which
-    // was previously thrown away, so "out of credits" and "wrong key" looked
-    // identical, and both looked like a network failure.
+    // Worker first — it caches, so pressing the button repeatedly in a session
+    // costs one fetch rather than one per press. Ten minutes for K and TB, which
+    // barely move in that window; six hours for HR, which feeds a single headline
+    // slot and does not need to be fresh.
+    //
+    // The Odds API returns 401 for BOTH a rejected key and an exhausted quota and
+    // only the body says which, so the body is read on failure instead of thrown
+    // away. Not doing that is what made "out of credits" look like a dead key.
+    const ttl = 600;   // all markets ride in one request, so one TTL applies
     try {
-      const r = await timedFetch(url, 10000);
-      // Remaining-credit headers, when CORS lets us see them. Watching this drop
-      // is the difference between noticing exhaustion and discovering it.
+      const r = await timedFetch(CF_WORKER_URL, 12000, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'odds-proxy', url, ttl }),
+      });
       const rem = r.headers.get('x-requests-remaining');
-      if (rem != null && Number.isFinite(parseInt(rem))) S.propsRemaining = parseInt(rem);
-      if (r.ok) { const t=await r.text(); if(t.trim()) data=JSON.parse(t); }
+      if (rem && Number.isFinite(parseInt(rem))) S.propsRemaining = parseInt(rem);
+      const t = await r.text();
+      if (r.ok) { if (t.trim()) data = JSON.parse(t); }
       else {
-        const t = await r.text().catch(() => '');
         let code = null, msg = null;
         try { const j = JSON.parse(t); code = j.error_code || null; msg = j.message || null; } catch {}
         if (!S.propsErr) S.propsErr = { status: r.status, code, msg };
